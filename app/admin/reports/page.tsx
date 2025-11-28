@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { ReportData, ProductSales, CategorySales, TimeSeriesData, PieDataItem } from '@/types'
-import { Calendar, Download, Filter, BarChart3, PieChart, TrendingUp } from 'lucide-react'
+import { Calendar, Download, Filter, BarChart3, PieChart, TrendingUp, Menu, X } from 'lucide-react'
 import { 
   BarChart, Bar, 
   LineChart, Line, 
@@ -23,6 +23,20 @@ export default function ReportsPage() {
   const [timeSeriesData, setTimeSeriesData] = useState<TimeSeriesData[]>([])
   const [pieChartData, setPieChartData] = useState<PieDataItem[]>([])
   const [loading, setLoading] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
+  const [showMobileFilters, setShowMobileFilters] = useState(false)
+
+  // Detect screen size
+  useEffect(() => {
+    const checkScreenSize = () => {
+      setIsMobile(window.innerWidth < 768)
+    }
+    
+    checkScreenSize()
+    window.addEventListener('resize', checkScreenSize)
+    
+    return () => window.removeEventListener('resize', checkScreenSize)
+  }, [])
 
   useEffect(() => {
     // Set default date range to current month
@@ -535,7 +549,7 @@ export default function ReportsPage() {
     return null;
   };
 
-  // Fungsi untuk menghitung total pie chart data
+  // Fungsi pie chart data
   const getPieChartTotal = (): number => {
     return pieChartData.reduce((sum: number, item: PieDataItem) => sum + item.value, 0);
   };
@@ -551,24 +565,24 @@ export default function ReportsPage() {
   }
 
   return (
-    <div className="p-8">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="text-3xl font-bold text-amber-900">Laporan Penjualan</h1>
-          <p className="text-amber-600 mt-2">Analisis detail performa kedai kopi Anda</p>
+    <div className="p-4 sm:p-6 lg:p-8">
+      {/* Header Section */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 sm:mb-8">
+        <div className="flex-1">
+          <h1 className="text-2xl sm:text-3xl font-bold text-amber-900">Laporan Penjualan</h1>
+          <p className="text-amber-600 mt-1 sm:mt-2 text-sm sm:text-base">Analisis detail performa kedai kopi Anda</p>
         </div>
-        <div className="flex space-x-3">
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
           <button
             onClick={exportToXLS}
-            className="bg-green-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-green-700 transition-colors"
+            className="bg-green-600 text-white px-3 sm:px-4 py-2 rounded-lg flex items-center justify-center space-x-2 hover:bg-green-700 transition-colors text-sm sm:text-base"
           >
             <Download className="h-4 w-4" />
             <span>Export Excel</span>
           </button>
           <button
             onClick={exportToPDF}
-            className="bg-red-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 hover:bg-red-700 transition-colors"
+            className="bg-red-600 text-white px-3 sm:px-4 py-2 rounded-lg flex items-center justify-center space-x-2 hover:bg-red-700 transition-colors text-sm sm:text-base"
           >
             <Download className="h-4 w-4" />
             <span>Export PDF</span>
@@ -576,14 +590,28 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      {/* Date Range Selector */}
-      <div className="bg-white rounded-lg shadow p-6 mb-8">
-        <div className="flex items-center justify-between mb-4">
+      {/* Mobile Filter Toggle */}
+      {isMobile && (
+        <button
+          onClick={() => setShowMobileFilters(!showMobileFilters)}
+          className="w-full bg-white rounded-lg shadow p-4 mb-4 flex items-center justify-between"
+        >
+          <span className="flex items-center">
+            <Filter className="h-5 w-5 mr-2" />
+            Filter Laporan
+          </span>
+          {showMobileFilters ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+        </button>
+      )}
+
+      {/* Date Selector */}
+      <div className={`bg-white rounded-lg shadow p-4 sm:p-6 mb-6 sm:mb-8 ${isMobile && !showMobileFilters ? 'hidden' : 'block'}`}>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4 gap-3">
           <h3 className="text-lg font-semibold flex items-center">
             <Filter className="h-5 w-5 mr-2" />
             Filter Laporan
           </h3>
-          <div className="flex space-x-2">
+          <div className="flex flex-wrap gap-2 w-full sm:w-auto">
             {Object.entries(quickDateRanges).map(([label, getDates]) => (
               <button
                 key={label}
@@ -591,8 +619,9 @@ export default function ReportsPage() {
                   const dates = getDates()
                   setStartDate(dates.start)
                   setEndDate(dates.end)
+                  if (isMobile) setShowMobileFilters(false)
                 }}
-                className="px-3 py-1 text-sm bg-amber-100 text-amber-800 rounded-md hover:bg-amber-200 transition-colors"
+                className="px-3 py-1 text-xs sm:text-sm bg-amber-100 text-amber-800 rounded-md hover:bg-amber-200 transition-colors flex-1 sm:flex-none text-center"
               >
                 {label}
               </button>
@@ -600,31 +629,31 @@ export default function ReportsPage() {
           </div>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Tanggal Mulai</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1 sm:mb-2">Tanggal Mulai</label>
             <input
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Tanggal Akhir</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1 sm:mb-2">Tanggal Akhir</label>
             <input
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Rentang Waktu</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1 sm:mb-2">Rentang Waktu</label>
             <select
               value={timeRange}
               onChange={(e) => setTimeRange(e.target.value as any)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
             >
               <option value="week">Mingguan</option>
               <option value="month">Bulanan</option>
@@ -643,55 +672,55 @@ export default function ReportsPage() {
         <>
           {/* Summary Cards */}
           {reportData && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-              <div className="bg-white rounded-lg shadow p-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 lg:gap-6 mb-6 sm:mb-8">
+              <div className="bg-white rounded-lg shadow p-4 sm:p-6">
                 <div className="flex items-center">
-                  <div className="h-10 w-10 bg-green-100 rounded-full flex items-center justify-center">
-                    <span className="text-green-600 font-bold">Rp</span>
+                  <div className="h-8 w-8 sm:h-10 sm:w-10 bg-green-100 rounded-full flex items-center justify-center">
+                    <span className="text-green-600 font-bold text-sm">Rp</span>
                   </div>
-                  <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-600">Total Revenue</p>
-                    <p className="text-xl font-bold text-gray-900">
+                  <div className="ml-3 sm:ml-4">
+                    <p className="text-xs sm:text-sm font-medium text-gray-600">Total Revenue</p>
+                    <p className="text-lg sm:text-xl font-bold text-gray-900 truncate">
                       Rp {reportData.revenue.toLocaleString('id-ID')}
                     </p>
                   </div>
                 </div>
               </div>
 
-              <div className="bg-white rounded-lg shadow p-6">
+              <div className="bg-white rounded-lg shadow p-4 sm:p-6">
                 <div className="flex items-center">
-                  <div className="h-10 w-10 bg-blue-100 rounded-full flex items-center justify-center">
-                    <BarChart3 className="h-5 w-5 text-blue-600" />
+                  <div className="h-8 w-8 sm:h-10 sm:w-10 bg-blue-100 rounded-full flex items-center justify-center">
+                    <BarChart3 className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600" />
                   </div>
-                  <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-600">Total Orders</p>
-                    <p className="text-xl font-bold text-gray-900">{reportData.orders}</p>
+                  <div className="ml-3 sm:ml-4">
+                    <p className="text-xs sm:text-sm font-medium text-gray-600">Total Orders</p>
+                    <p className="text-lg sm:text-xl font-bold text-gray-900">{reportData.orders}</p>
                   </div>
                 </div>
               </div>
 
-              <div className="bg-white rounded-lg shadow p-6">
+              <div className="bg-white rounded-lg shadow p-4 sm:p-6">
                 <div className="flex items-center">
-                  <div className="h-10 w-10 bg-purple-100 rounded-full flex items-center justify-center">
-                    <TrendingUp className="h-5 w-5 text-purple-600" />
+                  <div className="h-8 w-8 sm:h-10 sm:w-10 bg-purple-100 rounded-full flex items-center justify-center">
+                    <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 text-purple-600" />
                   </div>
-                  <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-600">Avg Order Value</p>
-                    <p className="text-xl font-bold text-gray-900">
+                  <div className="ml-3 sm:ml-4">
+                    <p className="text-xs sm:text-sm font-medium text-gray-600">Avg Order Value</p>
+                    <p className="text-lg sm:text-xl font-bold text-gray-900 truncate">
                       Rp {reportData.averageOrderValue.toLocaleString('id-ID')}
                     </p>
                   </div>
                 </div>
               </div>
 
-              <div className="bg-white rounded-lg shadow p-6">
+              <div className="bg-white rounded-lg shadow p-4 sm:p-6">
                 <div className="flex items-center">
-                  <div className="h-10 w-10 bg-amber-100 rounded-full flex items-center justify-center">
-                    <PieChart className="h-5 w-5 text-amber-600" />
+                  <div className="h-8 w-8 sm:h-10 sm:w-10 bg-amber-100 rounded-full flex items-center justify-center">
+                    <PieChart className="h-4 w-4 sm:h-5 sm:w-5 text-amber-600" />
                   </div>
-                  <div className="ml-4">
-                    <p className="text-sm font-medium text-gray-600">Best Seller</p>
-                    <p className="text-lg font-bold text-gray-900 truncate" title={reportData.bestSellingProduct}>
+                  <div className="ml-3 sm:ml-4">
+                    <p className="text-xs sm:text-sm font-medium text-gray-600">Best Seller</p>
+                    <p className="text-base sm:text-lg font-bold text-gray-900 truncate" title={reportData.bestSellingProduct}>
                       {reportData.bestSellingProduct}
                     </p>
                   </div>
@@ -701,18 +730,24 @@ export default function ReportsPage() {
           )}
 
           {/* Charts Grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6 lg:gap-8 mb-6 sm:mb-8">
             {/* Revenue Trend */}
-            <div className="bg-white rounded-lg shadow p-6">
-              <h3 className="text-lg font-semibold mb-4 flex items-center">
-                <TrendingUp className="h-5 w-5 mr-2" />
+            <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+              <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 flex items-center">
+                <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
                 Revenue Trend
               </h3>
-              <ResponsiveContainer width="100%" height={300}>
+              <ResponsiveContainer width="100%" height={isMobile ? 250 : 300}>
                 <LineChart data={timeSeriesData}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis />
+                  <XAxis 
+                    dataKey="date" 
+                    fontSize={isMobile ? 10 : 12}
+                  />
+                  <YAxis 
+                    fontSize={isMobile ? 10 : 12}
+                    tickFormatter={(value: number) => `Rp${value / 1000}k`}
+                  />
                   <Tooltip 
                     formatter={(value: number) => [`Rp ${Number(value).toLocaleString('id-ID')}`, 'Revenue']}
                   />
@@ -723,23 +758,28 @@ export default function ReportsPage() {
                     stroke="#d97706" 
                     strokeWidth={3}
                     name="Revenue"
-                    dot={{ fill: '#d97706', strokeWidth: 2, r: 4 }}
+                    dot={{ fill: '#d97706', strokeWidth: 2, r: isMobile ? 2 : 4 }}
                   />
                 </LineChart>
               </ResponsiveContainer>
             </div>
 
             {/* Orders Trend */}
-            <div className="bg-white rounded-lg shadow p-6">
-              <h3 className="text-lg font-semibold mb-4 flex items-center">
-                <BarChart3 className="h-5 w-5 mr-2" />
+            <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+              <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 flex items-center">
+                <BarChart3 className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
                 Orders Trend
               </h3>
-              <ResponsiveContainer width="100%" height={300}>
+              <ResponsiveContainer width="100%" height={isMobile ? 250 : 300}>
                 <BarChart data={timeSeriesData}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis />
+                  <XAxis 
+                    dataKey="date" 
+                    fontSize={isMobile ? 10 : 12}
+                  />
+                  <YAxis 
+                    fontSize={isMobile ? 10 : 12}
+                  />
                   <Tooltip />
                   <Legend />
                   <Bar 
@@ -753,22 +793,22 @@ export default function ReportsPage() {
             </div>
 
             {/* Sales by Product Name - UPDATED PIE CHART */}
-            <div className="bg-white rounded-lg shadow p-6">
-              <h3 className="text-lg font-semibold mb-4 flex items-center">
-                <PieChart className="h-5 w-5 mr-2" />
+            <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+              <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4 flex items-center">
+                <PieChart className="h-4 w-4 sm:h-5 sm:w-5 mr-2" />
                 Sales by Product Name
               </h3>
               
               {pieChartData.length > 0 ? (
                 <>
-                  <ResponsiveContainer width="100%" height={300}>
+                  <ResponsiveContainer width="100%" height={isMobile ? 200 : 250}>
                     <RechartsPie>
                       <Pie
                         data={pieChartData}
                         cx="50%"
                         cy="50%"
                         labelLine={false}
-                        outerRadius={100}
+                        outerRadius={isMobile ? 70 : 90}
                         fill="#8884d8"
                         dataKey="value"
                         label={({ percent }) => percent && percent > 0.05 ? `${(percent * 100).toFixed(0)}%` : ''}
@@ -785,26 +825,26 @@ export default function ReportsPage() {
                   </ResponsiveContainer>
                   
                   {/* Legend Manual */}
-                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                  <div className="mt-3 sm:mt-4 grid grid-cols-1 gap-1 sm:gap-2 text-xs sm:text-sm">
                     {pieChartData.map((item: PieDataItem, index: number) => {
                       const total = getPieChartTotal();
                       const percentage = total > 0 ? (item.value / total) * 100 : 0;
                       return (
-                        <div key={item.name} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                        <div key={item.name} className="flex items-center justify-between p-1 sm:p-2 bg-gray-50 rounded">
                           <div className="flex items-center flex-1 min-w-0">
                             <div 
-                              className="w-3 h-3 rounded-full mr-2 shrink-0"
+                              className="w-2 h-2 sm:w-3 sm:h-3 rounded-full mr-1 sm:mr-2 shrink-0"
                               style={{ backgroundColor: COLORS[index % COLORS.length] }}
                             />
-                            <span className="truncate" title={item.name}>
+                            <span className="truncate text-xs sm:text-sm" title={item.name}>
                               {item.name}
                             </span>
                           </div>
-                          <div className="text-right shrink-0 ml-2">
-                            <span className="text-gray-600 font-medium">
+                          <div className="text-right shrink-0 ml-1 sm:ml-2">
+                            <span className="text-gray-600 font-medium text-xs sm:text-sm">
                               {percentage.toFixed(1)}%
                             </span>
-                            <div className="text-xs text-gray-500">
+                            <div className="text-xs text-gray-500 hidden sm:block">
                               Rp {item.value.toLocaleString('id-ID')}
                             </div>
                           </div>
@@ -814,31 +854,32 @@ export default function ReportsPage() {
                   </div>
                 </>
               ) : (
-                <div className="flex items-center justify-center h-300">
-                  <p className="text-gray-500">No sales data available for the selected period</p>
+                <div className="flex items-center justify-center h-200">
+                  <p className="text-gray-500 text-sm">No sales data available for the selected period</p>
                 </div>
               )}
             </div>
 
             {/* Top Products */}
-            <div className="bg-white rounded-lg shadow p-6">
-              <h3 className="text-lg font-semibold mb-4">Top 10 Products by Revenue</h3>
-              <ResponsiveContainer width="100%" height={300}>
+            <div className="bg-white rounded-lg shadow p-4 sm:p-6">
+              <h3 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4">Top 10 Products by Revenue</h3>
+              <ResponsiveContainer width="100%" height={isMobile ? 300 : 350}>
                 <BarChart
                   data={productSales}
                   layout="vertical"
-                  margin={{ top: 5, right: 30, left: 100, bottom: 5 }}
+                  margin={{ top: 5, right: 20, left: isMobile ? 70 : 100, bottom: 5 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis 
                     type="number" 
-                    tickFormatter={(value: number) => `Rp ${value.toLocaleString('id-ID')}`}
+                    tickFormatter={(value: number) => `Rp${value / 1000}k`}
+                    fontSize={isMobile ? 10 : 12}
                   />
                   <YAxis 
                     type="category" 
                     dataKey="product_name" 
-                    width={80}
-                    tick={{ fontSize: 12 }}
+                    width={isMobile ? 60 : 80}
+                    tick={{ fontSize: isMobile ? 10 : 12 }}
                   />
                   <Tooltip 
                     formatter={(value: number) => [`Rp ${Number(value).toLocaleString('id-ID')}`, 'Revenue']}
@@ -856,30 +897,32 @@ export default function ReportsPage() {
           </div>
 
           {/* Detailed Tables */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6 lg:gap-8">
             {/* Product Sales Table */}
             <div className="bg-white rounded-lg shadow">
-              <div className="p-6 border-b">
-                <h3 className="text-lg font-semibold">Product Sales Details</h3>
+              <div className="p-4 sm:p-6 border-b">
+                <h3 className="text-base sm:text-lg font-semibold">Product Sales Details</h3>
               </div>
-              <div className="p-6">
+              <div className="p-2 sm:p-4 lg:p-6">
                 <div className="overflow-x-auto">
-                  <table className="w-full">
+                  <table className="w-full min-w-[500px]">
                     <thead>
                       <tr className="border-b">
-                        <th className="text-left py-2">Product Name</th>
-                        <th className="text-left py-2">Category</th>
-                        <th className="text-left py-2">Quantity</th>
-                        <th className="text-left py-2">Revenue</th>
+                        <th className="text-left py-2 text-xs sm:text-sm">Product Name</th>
+                        <th className="text-left py-2 text-xs sm:text-sm">Category</th>
+                        <th className="text-left py-2 text-xs sm:text-sm">Quantity</th>
+                        <th className="text-left py-2 text-xs sm:text-sm">Revenue</th>
                       </tr>
                     </thead>
                     <tbody>
                       {productSales.map((product: ProductSales, index: number) => (
                         <tr key={index} className="border-b">
-                          <td className="py-3 font-medium">{product.product_name}</td>
-                          <td className="py-3">{product.category}</td>
-                          <td className="py-3">{product.quantity_sold}</td>
-                          <td className="py-3">Rp {product.total_revenue.toLocaleString('id-ID')}</td>
+                          <td className="py-2 sm:py-3 font-medium text-xs sm:text-sm truncate max-w-[120px] sm:max-w-none">
+                            {product.product_name}
+                          </td>
+                          <td className="py-2 sm:py-3 text-xs sm:text-sm">{product.category}</td>
+                          <td className="py-2 sm:py-3 text-xs sm:text-sm">{product.quantity_sold}</td>
+                          <td className="py-2 sm:py-3 text-xs sm:text-sm">Rp {product.total_revenue.toLocaleString('id-ID')}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -890,27 +933,27 @@ export default function ReportsPage() {
 
             {/* Category Sales Table */}
             <div className="bg-white rounded-lg shadow">
-              <div className="p-6 border-b">
-                <h3 className="text-lg font-semibold">Category Performance</h3>
+              <div className="p-4 sm:p-6 border-b">
+                <h3 className="text-base sm:text-lg font-semibold">Category Performance</h3>
               </div>
-              <div className="p-6">
+              <div className="p-2 sm:p-4 lg:p-6">
                 <div className="overflow-x-auto">
-                  <table className="w-full">
+                  <table className="w-full min-w-[500px]">
                     <thead>
                       <tr className="border-b">
-                        <th className="text-left py-2">Category</th>
-                        <th className="text-left py-2">Quantity</th>
-                        <th className="text-left py-2">Revenue</th>
-                        <th className="text-left py-2">Percentage</th>
+                        <th className="text-left py-2 text-xs sm:text-sm">Category</th>
+                        <th className="text-left py-2 text-xs sm:text-sm">Quantity</th>
+                        <th className="text-left py-2 text-xs sm:text-sm">Revenue</th>
+                        <th className="text-left py-2 text-xs sm:text-sm">Percentage</th>
                       </tr>
                     </thead>
                     <tbody>
                       {categorySales.map((category: CategorySales, index: number) => (
                         <tr key={index} className="border-b">
-                          <td className="py-3">{category.category}</td>
-                          <td className="py-3">{category.quantity_sold}</td>
-                          <td className="py-3">Rp {category.total_revenue.toLocaleString('id-ID')}</td>
-                          <td className="py-3">{category.percentage.toFixed(1)}%</td>
+                          <td className="py-2 sm:py-3 text-xs sm:text-sm">{category.category}</td>
+                          <td className="py-2 sm:py-3 text-xs sm:text-sm">{category.quantity_sold}</td>
+                          <td className="py-2 sm:py-3 text-xs sm:text-sm">Rp {category.total_revenue.toLocaleString('id-ID')}</td>
+                          <td className="py-2 sm:py-3 text-xs sm:text-sm">{category.percentage.toFixed(1)}%</td>
                         </tr>
                       ))}
                     </tbody>
