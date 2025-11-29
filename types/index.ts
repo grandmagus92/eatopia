@@ -93,3 +93,27 @@ export interface PieDataItem {
   percentage?: number;
   [key: string]: any;
 }
+
+export interface OrderItem {
+  id: string
+  order_id: string
+  product_id: string
+  quantity: number
+  price: number
+  subtotal: number
+  created_at: string
+  products: Product // HARUS 'products' (plural) sesuai dengan query Supabase
+}
+
+export interface Order {
+  id: string
+  order_number: string
+  total_amount: number
+  status: 'pending' | 'processing' | 'completed' | 'cancelled'
+  payment_method: string
+  customer_name?: string
+  customer_phone?: string
+  notes?: string
+  created_at: string
+  updated_at: string
+}
