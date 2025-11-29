@@ -113,88 +113,95 @@ export default function OrdersPage() {
       </div>
 
       {/* ====================== DETAIL MODAL ======================= */}
-      {detailOpen && selectedOrder && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-xl">
-            
-            {/* Header */}
-            <div className="flex justify-between p-4 border-b">
-              <h2 className="text-xl font-bold">Order Detail #{selectedOrder.id}</h2>
-              <button onClick={closeModals}>
-                <X className="h-6 w-6" />
-              </button>
-            </div>
+   {showDetailModal && selectedOrder && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 px-4">
+    <div
+      className="
+        bg-white w-full max-w-md md:max-w-2xl 
+        rounded-lg shadow-lg overflow-hidden 
+        max-h-[90vh] flex flex-col
+      "
+    >
+      {/* HEADER */}
+      <div className="flex justify-between items-center p-4 border-b">
+        <h3 className="text-lg font-semibold">Order Details</h3>
+        <button onClick={closeModals} className="text-gray-600 hover:text-gray-900">
+          ✕
+        </button>
+      </div>
 
-            <div className="p-4 space-y-6">
-              {/* Customer Info */}
-              <div className="bg-gray-50 p-4 rounded-lg border">
-                <h3 className="font-semibold mb-3">Informasi Pelanggan</h3>
+      {/* BODY */}
+      <div className="p-4 space-y-5 overflow-y-auto flex-1">
+        
+        {/* CUSTOMER INFO */}
+        <div className="bg-gray-50 p-4 rounded-lg border">
+          <h4 className="font-semibold mb-3">Informasi Pelanggan</h4>
+          <p><span className="text-gray-600">Nama:</span> {selectedOrder.customer_name || "Walk-in"}</p>
+          <p><span className="text-gray-600">Telepon:</span> {selectedOrder.customer_phone || "-"}</p>
+          <p><span className="text-gray-600">Catatan:</span> {selectedOrder.notes || "-"}</p>
+        </div>
 
-                <div className="space-y-1 text-sm">
-                  <p><strong>Nama:</strong> {selectedOrder.customer_name || "Walk-in"}</p>
-                  <p><strong>Telepon:</strong> {selectedOrder.customer_phone || "-"}</p>
-                  <p><strong>Catatan:</strong> {selectedOrder.notes || "-"}</p>
+        {/* ITEM LIST */}
+        <div className="bg-gray-50 p-4 rounded-lg border">
+          <h4 className="font-semibold mb-3">Items</h4>
+
+          <div className="space-y-3">
+            {selectedOrder.order_items?.map((item: any) => (
+              <div key={item.id} className="flex justify-between items-start">
+                <div>
+                  <p className="font-medium text-sm md:text-base">{item.products?.name}</p>
+                  <p className="text-gray-500 text-xs md:text-sm">
+                    {item.quantity} × Rp {item.price.toLocaleString("id-ID")}
+                  </p>
                 </div>
+                <p className="font-semibold text-amber-700 text-sm md:text-base">
+                  Rp {(item.quantity * item.price).toLocaleString("id-ID")}
+                </p>
               </div>
-
-              {/* Items */}
-              <div className="bg-gray-50 p-4 rounded-lg border">
-                <h3 className="font-semibold mb-3">Items</h3>
-
-                <div className="space-y-4">
-                  {selectedOrder.order_items.map((item: any) => (
-                    <div key={item.id} className="flex justify-between">
-                      <div>
-                        <p className="font-medium">{item.products?.name}</p>
-                        <p className="text-sm text-gray-500">
-                          {item.quantity} × Rp {item.price.toLocaleString("id-ID")}
-                        </p>
-                      </div>
-
-                      <p className="font-semibold">
-                        Rp {(item.quantity * item.price).toLocaleString("id-ID")}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Total */}
-              <div className="bg-amber-50 p-4 rounded-lg border border-amber-200 flex justify-between">
-                <span className="font-semibold text-lg">Total</span>
-                <span className="font-bold text-amber-700 text-lg">
-                  Rp {selectedOrder.total_amount.toLocaleString("id-ID")}
-                </span>
-              </div>
-
-              {/* Status */}
-              <div className="bg-gray-50 p-4 rounded-lg border">
-                <h3 className="font-semibold mb-2">Status Order</h3>
-
-                <select
-                  value={selectedOrder.status}
-                  onChange={(e) => updateOrderStatus(selectedOrder.id, e.target.value)}
-                  className="w-full px-3 py-2 border rounded-lg"
-                >
-                  <option value="pending">Pending</option>
-                  <option value="processing">Processing</option>
-                  <option value="completed">Completed</option>
-                  <option value="cancelled">Cancelled</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="flex justify-end p-4 border-t">
-              <button
-                onClick={closeModals}
-                className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
-              >
-                Tutup
-              </button>
-            </div>
+            ))}
           </div>
         </div>
+
+        {/* TOTAL */}
+        <div className="bg-amber-50 p-4 rounded-lg border border-amber-200">
+          <div className="flex justify-between text-lg font-semibold">
+            <span>Total:</span>
+            <span className="text-amber-700">
+              Rp {selectedOrder.total_amount.toLocaleString("id-ID")}
+            </span>
+          </div>
+        </div>
+
+        {/* STATUS */}
+        <div className="bg-gray-50 p-4 rounded-lg border">
+          <h4 className="font-semibold mb-3">Status</h4>
+          <select
+            className="w-full px-3 py-2 border rounded-lg"
+            value={selectedOrder.status}
+            onChange={(e) =>
+              updateOrderStatus(selectedOrder.id, e.target.value as any)
+            }
+          >
+            <option value="pending">Pending</option>
+            <option value="processing">Processing</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </div>
+      </div>
+
+      {/* FOOTER */}
+      <div className="p-4 border-t flex justify-end bg-white">
+        <button
+          onClick={closeModals}
+          className="px-5 py-2 bg-gray-200 rounded-lg hover:bg-gray-300"
+        >
+          Tutup
+        </button>
+      </div>
+    </div>
+  </div>
+)}
       )}
     </div>
   );
