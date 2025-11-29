@@ -1,10 +1,14 @@
-// app/admin/dashboard/page.tsx
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Order, Product, SalesData } from '@/types'
-import { TrendingUp, Users, Coffee, DollarSign, ShoppingCart, Clock, RefreshCw } from 'lucide-react'
+import { TrendingUp, Users, Coffee, DollarSign, ShoppingCart, Clock, RefreshCw, CheckCircle, XCircle } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts'
+
+// Extend SalesData type untuk include dateObj
+interface ExtendedSalesData extends SalesData {
+  dateObj?: Date;
+}
 
 export default function DashboardPage() {
   const [stats, setStats] = useState({
@@ -16,25 +20,60 @@ export default function DashboardPage() {
     todayOrders: 0
   })
   const [recentOrders, setRecentOrders] = useState<Order[]>([])
-  const [salesData, setSalesData] = useState<SalesData[]>([])
+  const [salesData, setSalesData] = useState<ExtendedSalesData[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
   useEffect(() => {
     fetchDashboardData()
+    
+    // Set up interval untuk auto-refresh setiap menit
+    const interval = setInterval(() => {
+      const now = new Date()
+      // Cek jika sudah hari baru (00:00)
+      if (now.getHours() === 0 && now.getMinutes() === 0) {
+        fetchDashboardData()
+      }
+    }, 60000) // Check every minute
+
+    return () => clearInterval(interval)
   }, [])
 
   const fetchDashboardData = async () => {
     try {
       setLoading(true)
       
-      // Fetch orders
-      const { data: orders, error: ordersError } = await supabase
+      // Get today's date in local timezone
+      const today = new Date()
+      const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+      const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1)
+      
+      // Format dates for Supabase query
+      const todayStartISO = todayStart.toISOString()
+      const todayEndISO = todayEnd.toISOString()
+
+      console.log('Fetching data for today:', {
+        start: todayStartISO,
+        end: todayEndISO
+      })
+
+      // Fetch all orders for total stats
+      const { data: allOrders, error: allOrdersError } = await supabase
         .from('orders')
         .select('*')
-        .order('created_at', { ascending: false })
 
-      if (ordersError) throw ordersError
+      if (allOrdersError) throw allOrdersError
+
+      // Fetch today's orders specifically
+      const { data: todayOrders, error: todayOrdersError } = await supabase
+        .from('orders')
+        .select('*')
+        .gte('created_at', todayStartISO)
+        .lt('created_at', todayEndISO)
+
+      if (todayOrdersError) throw todayOrdersError
+
+      console.log('Today orders:', todayOrders)
 
       // Fetch products
       const { data: products, error: productsError } = await supabase
@@ -43,19 +82,15 @@ export default function DashboardPage() {
 
       if (productsError) throw productsError
 
-      // Calculate today's date
-      const today = new Date().toISOString().split('T')[0]
-      const todayOrders = orders?.filter(order => 
-        order.created_at.split('T')[0] === today
-      ) || []
-
       // Calculate statistics
-      const totalRevenue = orders?.reduce((sum: number, order: Order) => sum + order.total_amount, 0) || 0
-      const totalOrders = orders?.length || 0
+      const totalRevenue = allOrders?.reduce((sum: number, order: Order) => sum + order.total_amount, 0) || 0
+      const totalOrders = allOrders?.length || 0
       const totalProducts = products?.length || 0
       const averageOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0
-      const todayRevenue = todayOrders.reduce((sum: number, order: Order) => sum + order.total_amount, 0)
-      const todayOrdersCount = todayOrders.length
+      
+      // Today's stats - akan reset otomatis setiap hari baru
+      const todayRevenue = todayOrders?.reduce((sum: number, order: Order) => sum + order.total_amount, 0) || 0
+      const todayOrdersCount = todayOrders?.length || 0
 
       setStats({
         totalRevenue,
@@ -66,7 +101,7 @@ export default function DashboardPage() {
         todayOrders: todayOrdersCount
       })
 
-      // Fetch recent orders dengan items
+      // Fetch recent orders dengan items (5 terbaru)
       const { data: recentOrdersData, error: recentOrdersError } = await supabase
         .from('orders')
         .select(`
@@ -83,8 +118,9 @@ export default function DashboardPage() {
       setRecentOrders(recentOrdersData || [])
 
       // Generate sales data untuk chart (last 7 days)
-      const last7Days = generateLast7DaysSales(orders || [])
+      const last7Days = await generateLast7DaysSales()
       setSalesData(last7Days)
+
     } catch (error) {
       console.error('Error fetching dashboard data:', error)
     } finally {
@@ -93,29 +129,73 @@ export default function DashboardPage() {
     }
   }
 
-  const generateLast7DaysSales = (orders: Order[]): SalesData[] => {
-    const days: SalesData[] = []
+  const generateLast7DaysSales = async (): Promise<ExtendedSalesData[]> => {
+    const days: ExtendedSalesData[] = []
+    
     for (let i = 6; i >= 0; i--) {
       const date = new Date()
       date.setDate(date.getDate() - i)
-      const dateString = date.toISOString().split('T')[0]
+      const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+      const dayEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1)
       
-      const dayOrders = orders.filter(order => 
-        order.created_at.split('T')[0] === dateString
-      )
+      const dayStartISO = dayStart.toISOString()
+      const dayEndISO = dayEnd.toISOString()
+
+      // Fetch orders for this specific day
+      const { data: dayOrders, error } = await supabase
+        .from('orders')
+        .select('*')
+        .gte('created_at', dayStartISO)
+        .lt('created_at', dayEndISO)
+
+      if (error) {
+        console.error('Error fetching day orders:', error)
+        continue
+      }
+
+      const revenue = dayOrders?.reduce((sum: number, order: Order) => sum + order.total_amount, 0) || 0
+      const ordersCount = dayOrders?.length || 0
       
       days.push({
-        date: date.toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric' }),
-        revenue: dayOrders.reduce((sum: number, order: Order) => sum + order.total_amount, 0),
-        orders: dayOrders.length
+        date: date.toLocaleDateString('id-ID', { 
+          weekday: 'short', 
+          day: 'numeric',
+          month: 'short'
+        }),
+        revenue,
+        orders: ordersCount,
+        dateObj: date // Simpan date object untuk sorting
       })
     }
-    return days
+    
+    // Sort by date
+    return days.sort((a, b) => {
+      const dateA = a.dateObj || new Date(0)
+      const dateB = b.dateObj || new Date(0)
+      return dateA.getTime() - dateB.getTime()
+    })
   }
 
   const handleRefresh = () => {
     setRefreshing(true)
     fetchDashboardData()
+  }
+
+  // Function untuk mendapatkan informasi hari ini
+  const getTodayInfo = () => {
+    const today = new Date()
+    return {
+      date: today.toLocaleDateString('id-ID', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      }),
+      time: today.toLocaleTimeString('id-ID', {
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    }
   }
 
   if (loading) {
@@ -129,13 +209,21 @@ export default function DashboardPage() {
     )
   }
 
+  const todayInfo = getTodayInfo()
+
   return (
-    <div className="space-y-4 lg:space-y-6">
+    <div className="space-y-4 lg:space-y-6 p-4 lg:p-6">
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl lg:text-3xl font-bold text-amber-900">Dashboard</h1>
           <p className="text-amber-600 mt-1 text-sm lg:text-base">Ringkasan performa bisnis Anda</p>
+          <div className="flex items-center space-x-2 mt-1">
+            <Clock className="h-3 w-3 text-amber-500" />
+            <span className="text-xs text-gray-500">
+              Data hari ini: {todayInfo.date} • {todayInfo.time}
+            </span>
+          </div>
         </div>
         <button 
           onClick={handleRefresh}
@@ -147,7 +235,32 @@ export default function DashboardPage() {
         </button>
       </div>
 
-      {/* Stats Grid - Lebih Responsive */}
+      {/* Today's Performance Banner */}
+      <div className="bg-gradient-to-r from-amber-500 to-amber-600 rounded-xl p-4 lg:p-6 text-white">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-lg lg:text-xl font-bold">Performa Hari Ini</h2>
+            <p className="text-amber-100 text-sm lg:text-base mt-1">
+              {todayInfo.date}
+            </p>
+          </div>
+          <div className="flex items-center space-x-4 lg:space-x-6 mt-3 lg:mt-0">
+            <div className="text-center">
+              <p className="text-amber-200 text-xs lg:text-sm">Pendapatan</p>
+              <p className="text-lg lg:text-2xl font-bold">
+                Rp {stats.todayRevenue.toLocaleString('id-ID')}
+              </p>
+            </div>
+            <div className="h-8 w-px bg-amber-400"></div>
+            <div className="text-center">
+              <p className="text-amber-200 text-xs lg:text-sm">Order</p>
+              <p className="text-lg lg:text-2xl font-bold">{stats.todayOrders}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 lg:gap-4">
         {/* Total Revenue */}
         <div className="bg-white rounded-xl shadow-sm border border-amber-100 p-3 lg:p-4 col-span-2 lg:col-span-1">
@@ -234,7 +347,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Charts Grid - Layout Responsive */}
+      {/* Charts Grid */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 lg:gap-6">
         {/* Revenue Chart */}
         <div className="bg-white rounded-xl shadow-sm border border-amber-100 p-4 lg:p-6">
@@ -310,7 +423,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Recent Orders - Full Width */}
+      {/* Recent Orders */}
       <div className="bg-white rounded-xl shadow-sm border border-amber-100">
         <div className="p-4 lg:p-6 border-b border-amber-100">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -403,11 +516,6 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
-
-      
     </div>
   )
 }
-
-// Import icon yang diperlukan
-import { CheckCircle, XCircle } from 'lucide-react'
