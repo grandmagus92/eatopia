@@ -863,33 +863,17 @@ export default function OrdersPage() {
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                               {order.order_items && order.order_items.length > 0 ? (
                                 order.order_items.map((item) => (
-                                  <div key={item.id} className="bg-white p-3 rounded-lg border border-gray-200">
-                                    <div className="flex justify-between items-start">
-                                      <div className="flex-1">
-                                        <p className="font-medium text-gray-900">
-                                          {item.products?.name || 'Nama produk tidak tersedia'}
-                                        </p>
-                                        <p className="text-sm text-gray-500 mt-1">
-                                          {item.quantity} x Rp {item.price.toLocaleString('id-ID')}
-                                        </p>
-                                        {item.products?.category && (
-                                          <p className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded-full inline-block mt-1">
-                                            {item.products.category}
-                                          </p>
-                                        )}
-                                        {item.products?.description && (
-                                          <p className="text-xs text-gray-600 mt-1 line-clamp-2">
-                                            {item.products.description}
-                                          </p>
-                                        )}
-                                      </div>
-                                      <div className="text-right">
-                                        <p className="font-semibold text-gray-900">
-                                          Rp {item.subtotal.toLocaleString('id-ID')}
-                                        </p>
-                                      </div>
-                                    </div>
-                                  </div>
+<div key={item.id} className="flex justify-between items-center p-3 bg-white rounded-lg border border-gray-200">
+                            <div className="flex-1">
+                              <p className="font-medium text-gray-900 text-sm">
+                                {item.products?.name || 'Nama produk tidak tersedia'}
+                              </p>
+                              
+                            </div>
+                            <p className="font-semibold text-gray-900 text-sm">
+                              x {item.quantity}
+                            </p>
+                          </div>
                                 ))
                               ) : (
                                 <div className="col-span-3 text-center py-8 text-gray-500">
