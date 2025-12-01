@@ -130,3 +130,10 @@ export interface PieDataItem {
   value: number;
   quantity: number;
 }
+
+export interface SalesData {
+  date: string
+  revenue: number
+  orders: number
+  customers?: number
+}
