@@ -48,12 +48,6 @@ export interface CreateOrderData {
   }[]
 }
 
-export interface SalesData {
-  date: string
-  revenue: number
-  orders: number
-  customers?: number
-}
 
 export interface ReportData {
   period: string
@@ -62,28 +56,6 @@ export interface ReportData {
   averageOrderValue: number
   bestSellingProduct: string
   bestSellingCategory: string
-}
-
-export interface ProductSales {
-  product_id: string
-  product_name: string
-  category: string
-  quantity_sold: number
-  total_revenue: number
-}
-
-export interface CategorySales {
-  category: string
-  quantity_sold: number
-  total_revenue: number
-  percentage: number
-}
-
-export interface TimeSeriesData {
-  date: string
-  revenue: number
-  orders: number
-  customers?: number
 }
 
 export interface PieDataItem {
@@ -131,3 +103,30 @@ export interface ReportData {
   uniqueProductsSold: number;
 }
 
+export interface ProductSales {
+  product_name: string;
+  category: string;
+  quantity_sold: number;
+  total_revenue: number;
+  average_price?: number;
+}
+
+export interface CategorySales {
+  category: string;
+  quantity_sold: number;
+  total_revenue: number;
+  percentage: number;
+}
+
+export interface TimeSeriesData {
+  date: string;
+  revenue: number;
+  orders: number;
+  quantity: number;
+}
+
+export interface PieDataItem {
+  name: string;
+  value: number;
+  quantity: number;
+}
