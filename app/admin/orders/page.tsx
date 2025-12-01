@@ -59,7 +59,7 @@ export default function OrdersPage() {
   const [showDetailModal, setShowDetailModal] = useState(false)
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [submitLoading, setSubmitLoading] = useState(false)
-  
+
   // State UI
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [showMobileMenu, setShowMobileMenu] = useState<string | null>(null)
@@ -92,9 +92,9 @@ export default function OrdersPage() {
   const fetchOrders = async () => {
     try {
       setLoading(true)
-      
+
       console.log('🔄 Memulai fetch orders...')
-      
+
       // Method 1: Coba query dengan join langsung
       const { data: ordersData, error: ordersError } = await supabase
         .from('orders')
@@ -115,7 +115,7 @@ export default function OrdersPage() {
       }
 
       console.log('✅ Data orders dari query utama:', ordersData)
-      
+
       if (ordersData && ordersData.length > 0) {
         console.log('📦 Order pertama items:', ordersData[0].order_items)
       }
@@ -133,7 +133,7 @@ export default function OrdersPage() {
   const fetchOrdersWithManualJoin = async () => {
     try {
       console.log('🔄 Menggunakan fallback manual join...')
-      
+
       const { data: ordersData, error: ordersError } = await supabase
         .from('orders')
         .select('*')
@@ -203,7 +203,7 @@ export default function OrdersPage() {
       newExpanded.add(orderId)
     }
     setExpandedRows(newExpanded)
-    
+
     // Debug: lihat order yang di-expand
     const order = orders.find(o => o.id === orderId)
     if (order && !newExpanded.has(orderId)) {
@@ -247,7 +247,7 @@ export default function OrdersPage() {
       const orderNumber = `ORD-${Date.now()}`
 
       // Calculate total amount
-      const total_amount = formData.items.reduce((sum, item) => 
+      const total_amount = formData.items.reduce((sum, item) =>
         sum + (item.price * item.quantity), 0
       )
 
@@ -321,7 +321,7 @@ export default function OrdersPage() {
   // Delete order
   const deleteOrder = async (orderId: string) => {
     const orderToDelete = orders.find(order => order.id === orderId)
-    
+
     if (!confirm(`Apakah Anda yakin ingin menghapus order ${orderToDelete?.order_number}?`)) {
       return
     }
@@ -491,7 +491,7 @@ export default function OrdersPage() {
     return paymentMethod ? paymentMethod.label : method
   }
 
-  const totalAmount = formData.items.reduce((sum, item) => 
+  const totalAmount = formData.items.reduce((sum, item) =>
     sum + (item.price * item.quantity), 0
   )
 
@@ -720,7 +720,7 @@ export default function OrdersPage() {
                               <p className="font-medium text-gray-900 text-sm">
                                 {item.products?.name || 'Nama produk tidak tersedia'}
                               </p>
-                              
+
                             </div>
                             <p className="font-semibold text-gray-900 text-sm">
                               x {item.quantity}
@@ -840,7 +840,7 @@ export default function OrdersPage() {
                         </div>
                       </td>
                     </tr>
-                    
+
                     {/* Expanded Product Details for Desktop */}
                     {expandedRows.has(order.id) && (
                       <tr className="bg-gray-50 border-b border-amber-100">
@@ -859,7 +859,7 @@ export default function OrdersPage() {
                                         <p className="font-medium text-gray-900">
                                           {item.products?.name || 'Nama produk tidak tersedia'}
                                         </p>
-                                       
+
                                       </div>
                                       <div className="text-right">
                                         <p className="font-semibold text-gray-900">
@@ -967,9 +967,8 @@ export default function OrdersPage() {
 
               {/* Order Items */}
               <div>
-                <div className="flex items-center justify-between mb-4">
-                  <label className="text-sm font-medium text-gray-700 flex items-center">
-                    <Package className="h-4 w-4 mr-2 text-amber-600" />
+                <div className="flex items-center justify-between mb-3">
+                  <label className="text-sm font-medium text-gray-700">
                     Produk yang Dipesan
                   </label>
                   <button
@@ -978,96 +977,72 @@ export default function OrdersPage() {
                     className="text-amber-600 hover:text-amber-700 text-sm font-medium flex items-center space-x-1"
                   >
                     <Plus className="h-4 w-4" />
-                    <span>Tambah Item</span>
+                    <span>Tambah</span>
                   </button>
                 </div>
 
-                <div className="space-y-4">
+                <div className="space-y-2">
                   {formData.items.map((item, index) => (
-                    <div key={index} className="border border-gray-200 rounded-lg p-4">
-                      <div className="flex items-center justify-between mb-3">
-                        <h4 className="font-medium text-gray-900">Item #{index + 1}</h4>
-                        {formData.items.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => removeOrderItem(index)}
-                            className="text-red-600 hover:text-red-700 p-1 transition-colors"
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
-                        )}
+                    <div key={index} className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg bg-white">
+                      {/* Product Selection */}
+                      <div className="flex-1">
+                        <select
+                          value={item.product_id}
+                          onChange={(e) => updateOrderItem(index, 'product_id', e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 text-sm"
+                          required
+                        >
+                          <option value="">Pilih Produk</option>
+                          {products.map(product => (
+                            <option key={product.id} value={product.id}>
+                              {product.name}
+                            </option>
+                          ))}
+                        </select>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="text-xs text-gray-600 mb-1 block">Produk</label>
-                          <select
-                            value={item.product_id}
-                            onChange={(e) => updateOrderItem(index, 'product_id', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 text-sm"
-                            required
-                          >
-                            <option value="">Pilih Produk</option>
-                            {products.map(product => (
-                              <option key={product.id} value={product.id}>
-                                {product.name} - Rp {product.price.toLocaleString('id-ID')}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                      {/* Quantity Control */}
+                      <div className="flex items-center space-x-2">
+                        <button
+                          type="button"
+                          onClick={() => decreaseQuantity(index)}
+                          className="w-6 h-6 flex items-center justify-center rounded border border-gray-300 hover:bg-gray-100 transition-colors disabled:opacity-50"
+                          disabled={item.quantity <= 1}
+                        >
+                          <Minus className="h-3 w-3" />
+                        </button>
 
-                       
+                        <span className="text-sm font-medium w-8 text-center">
+                          {item.quantity}
+                        </span>
 
-                        <div>
-                          <label className="text-xs text-gray-600 mb-1 block">Quantity</label>
-                          <div className="flex items-center space-x-3">
-                            <button
-                              type="button"
-                              onClick={() => decreaseQuantity(index)}
-                              className="p-2 rounded-full border border-gray-300 hover:bg-gray-100 transition-colors"
-                              disabled={item.quantity <= 1}
-                            >
-                              <Minus className="h-3 w-3" />
-                            </button>
-                            <input
-                              type="number"
-                              value={item.quantity}
-                              onChange={(e) => handleQuantityChange(index, e.target.value)}
-                              className="w-16 px-2 py-1 border border-gray-300 rounded text-center text-sm"
-                              min="1"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => increaseQuantity(index)}
-                              className="p-2 rounded-full border border-gray-300 hover:bg-gray-100 transition-colors"
-                            >
-                              <Plus className="h-3 w-3" />
-                            </button>
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="text-xs text-gray-600 mb-1 block">Subtotal</label>
-                          <div className="px-3 py-2 bg-gray-50 rounded-lg text-sm font-semibold text-gray-900">
-                            Rp {(item.price * item.quantity).toLocaleString('id-ID')}
-                          </div>
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => increaseQuantity(index)}
+                          className="w-6 h-6 flex items-center justify-center rounded border border-gray-300 hover:bg-gray-100 transition-colors"
+                        >
+                          <Plus className="h-3 w-3" />
+                        </button>
                       </div>
+
+                      {/* Remove Button */}
+                      {formData.items.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeOrderItem(index)}
+                          className="text-red-500 hover:text-red-700 p-1 transition-colors"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
 
                 {formData.items.length === 0 && (
-                  <div className="text-center py-8 border-2 border-dashed border-gray-300 rounded-lg">
-                    <Package className="h-8 w-8 text-gray-300 mx-auto mb-2" />
-                    <p className="text-gray-500 text-sm">Belum ada produk yang ditambahkan</p>
-                    <button
-                      type="button"
-                      onClick={addItemToOrder}
-                      className="mt-2 text-amber-600 hover:text-amber-700 text-sm font-medium"
-                    >
-                      Tambah produk pertama
-                    </button>
+                  <div className="text-center py-6 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50">
+                    <Package className="h-6 w-6 text-gray-300 mx-auto mb-2" />
+                    <p className="text-gray-500 text-sm">Belum ada produk</p>
                   </div>
                 )}
               </div>
@@ -1202,10 +1177,10 @@ export default function OrdersPage() {
                     selectedOrder.order_items.map((item) => (
                       <div key={item.id} className="border border-gray-200 rounded-lg p-4">
                         <div className="flex justify-between items-start">
-                          
+
                           <div className="text-right">
                             <p className="font-semibold text-gray-900">
-                              x {item.quantity }
+                              x {item.quantity}
                             </p>
                           </div>
                         </div>
