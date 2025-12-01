@@ -117,3 +117,17 @@ export interface Order {
   updated_at: string
   order_items: OrderItem[]
 }
+
+export interface ReportData {
+  period: string;
+  revenue: number;
+  orders: number;
+  averageOrderValue: number;
+  bestSellingProduct: string;
+  bestSellingCategory: string;
+  totalQuantitySold: number;
+  bestSellingProductQuantity: number;
+  bestSellingCategoryQuantity: number;
+  uniqueProductsSold: number;
+}
+
