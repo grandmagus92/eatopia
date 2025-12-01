@@ -1,12 +1,12 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Order, Product, SalesData } from '@/types'
+import { Order, Product, ProductSales } from '@/types'
 import { TrendingUp, Users, Coffee, DollarSign, ShoppingCart, Clock, RefreshCw, CheckCircle, XCircle } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts'
 
 // Extend SalesData type untuk include dateObj
-interface ExtendedSalesData extends SalesData {
+interface ExtendedSalesData extends ProductSales {
   dateObj?: Date;
 }
 
