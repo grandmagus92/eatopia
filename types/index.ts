@@ -48,20 +48,15 @@ export interface CreateOrderData {
   }[]
 }
 
-export interface ReportData {
-  period: string;
-  revenue: number;
-  orders: number;
-  averageOrderValue: number;
-  bestSellingProduct: string;
-  bestSellingCategory: string;
-  totalCups: number;
-  totalSnack: number;
-  bestSellingProductQuantity: number;
-  bestSellingCategoryQuantity: number;
-  uniqueProductsSold: number;
-}
 
+export interface ReportData {
+  period: string
+  revenue: number
+  orders: number
+  averageOrderValue: number
+  bestSellingProduct: string
+  bestSellingCategory: string
+}
 
 export interface PieDataItem {
   name: string;
@@ -92,6 +87,7 @@ export interface Order {
   notes?: string
   created_at: string
   updated_at: string
+  completed_at: string | null // Tambahkan ini
   order_items: OrderItem[]
 }
 
@@ -102,7 +98,8 @@ export interface ReportData {
   averageOrderValue: number;
   bestSellingProduct: string;
   bestSellingCategory: string;
-  totalQuantitySold: number;
+  totalCups: number;
+  totalSnack: number;
   bestSellingProductQuantity: number;
   bestSellingCategoryQuantity: number;
   uniqueProductsSold: number;
