@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { ReportData, ProductSales, CategorySales, TimeSeriesData, PieDataItem } from '@/types'
-import { Calendar, Download, Filter, BarChart3, PieChart, TrendingUp, Menu, X, Package, Users, Star } from 'lucide-react'
+import { Calendar, Download, Filter, BarChart3, PieChart, TrendingUp, Menu, X, Package, Users, Star, Coffee } from 'lucide-react'
 import {
   BarChart, Bar,
   LineChart, Line,
@@ -54,11 +54,11 @@ const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, per
   const y = cy + radius * Math.sin(-midAngle * RADIAN);
 
   return (
-    <text 
-      x={x} 
-      y={y} 
-      fill="white" 
-      textAnchor={x > cx ? 'start' : 'end'} 
+    <text
+      x={x}
+      y={y}
+      fill="white"
+      textAnchor={x > cx ? 'start' : 'end'}
       dominantBaseline="central"
       fontSize={12}
       fontWeight="bold"
@@ -150,14 +150,25 @@ export default function ReportsPage() {
     const totalOrders = orders?.length || 0
     const averageOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0
 
-    // Hitung total quantity terjual
-    let totalQuantitySold = 0
+    // Hitung total cups (minuman) dan total snack terpisah
+    let totalCups = 0
+    let totalSnack = 0
     const productSalesMap = new Map()
     const categorySalesMap = new Map()
 
+    // Define drink categories (minuman)
+    const drinkCategories = ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic', 'Mocktail', 'Non-Coffe']
+
     orders?.forEach((order: any) => {
       order.order_items?.forEach((item: any) => {
-        totalQuantitySold += item.quantity
+        const category = item.products?.category || 'Unknown'
+
+        // Separate counting for drinks vs snacks
+        if (drinkCategories.includes(category)) {
+          totalCups += item.quantity
+        } else if (category === 'Snacks') {
+          totalSnack += item.quantity
+        }
 
         // Product sales
         const productName = item.products?.name || 'Unknown'
@@ -211,7 +222,8 @@ export default function ReportsPage() {
       averageOrderValue,
       bestSellingProduct,
       bestSellingCategory,
-      totalQuantitySold,
+      totalCups,
+      totalSnack,
       bestSellingProductQuantity,
       bestSellingCategoryQuantity,
       uniqueProductsSold
@@ -396,7 +408,9 @@ export default function ReportsPage() {
         ['SUMMARY'],
         ['Total Revenue', `Rp ${reportData?.revenue.toLocaleString('id-ID')}`],
         ['Total Orders', reportData?.orders],
-        ['Total Quantity Terjual', reportData?.totalQuantitySold],
+        ['Total Cups Terjual', reportData?.totalCups || 0],
+        ['Total Snack Terjual', reportData?.totalSnack || 0],
+        ['Total Quantity Terjual', (reportData?.totalCups || 0) + (reportData?.totalSnack || 0)],
         ['Produk Unik Terjual', reportData?.uniqueProductsSold],
         ['Average Order Value', `Rp ${reportData?.averageOrderValue.toLocaleString('id-ID')}`],
         ['Best Selling Product', `${reportData?.bestSellingProduct} (${reportData?.bestSellingProductQuantity} pcs)`],
@@ -427,13 +441,20 @@ export default function ReportsPage() {
       // Worksheet 3: Category Sales
       const categoryData = [
         ['CATEGORY SALES'],
-        ['Category', 'Quantity Sold', 'Revenue (Rp)', 'Percentage (%)'],
-        ...categorySales.map(category => [
-          category.category,
-          category.quantity_sold,
-          category.total_revenue,
-          category.percentage.toFixed(2)
-        ])
+        ['Category', 'Type', 'Quantity Sold', 'Revenue (Rp)', 'Percentage (%)'],
+        ...categorySales.map(category => {
+          const isSnack = category.category === 'Snacks';
+          const isDrink = ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic', 'Mocktail', 'Non-Coffe'].includes(category.category);
+          const type = isSnack ? 'Snack' : isDrink ? 'Drink' : 'Other';
+
+          return [
+            category.category,
+            type,
+            category.quantity_sold,
+            category.total_revenue,
+            category.percentage.toFixed(2)
+          ]
+        })
       ]
 
       const categorySheet = XLSX.utils.aoa_to_sheet(categoryData)
@@ -467,150 +488,525 @@ export default function ReportsPage() {
     }
   }
 
-  const exportToPDF = () => {
-    const printWindow = window.open('', '_blank')
-    if (printWindow) {
-      printWindow.document.write(`
-        <html>
-          <head>
-            <title>Sales Report ${startDate} to ${endDate}</title>
-            <style>
-              body { font-family: Arial, sans-serif; margin: 20px; }
-              .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #333; padding-bottom: 10px; }
-              .summary { margin-bottom: 30px; background: #f9f9f9; padding: 15px; border-radius: 5px; }
-              .chart { margin: 20px 0; }
-              table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-              th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-              th { background-color: #f5f5f5; font-weight: bold; }
-              .section { margin-bottom: 30px; }
-              .section-title { background: #d97706; color: white; padding: 10px; border-radius: 5px; }
-              .stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 15px 0; }
-              .stat-item { background: white; padding: 10px; border-radius: 5px; border-left: 4px solid #d97706; }
-            </style>
-          </head>
-          <body>
+ const exportToPDF = () => {
+  const printWindow = window.open('', '_blank')
+  if (printWindow) {
+    // Calculate summary data for PDF
+    const totalRevenue = reportData?.revenue || 0;
+    const totalCups = reportData?.totalCups || 0;
+    const totalSnack = reportData?.totalSnack || 0;
+    const totalQuantity = totalCups + totalSnack;
+    const totalOrders = reportData?.orders || 0;
+    const bestSeller = reportData?.bestSellingProduct || '-';
+    const bestSellerQty = reportData?.bestSellingProductQuantity || 0;
+    const uniqueProducts = reportData?.uniqueProductsSold || 0;
+    
+    // Calculate category totals
+    const categoryTotalQty = categorySales.reduce((sum, cat) => sum + cat.quantity_sold, 0);
+    const categoryTotalRevenue = categorySales.reduce((sum, cat) => sum + cat.total_revenue, 0);
+    
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Laporan Penjualan ${startDate} - ${endDate}</title>
+          <style>
+            @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
+            
+            * {
+              margin: 0;
+              padding: 0;
+              box-sizing: border-box;
+            }
+            
+            body {
+              font-family: 'Roboto', Arial, sans-serif;
+              margin: 0;
+              padding: 20px;
+              background: #ffffff;
+              color: #000000;
+              line-height: 1.4;
+              font-size: 12px;
+            }
+            
+            .container {
+              max-width: 210mm;
+              margin: 0 auto;
+              background: white;
+            }
+            
+            /* Header Styles */
+            .header {
+              text-align: center;
+              margin-bottom: 25px;
+              padding-bottom: 15px;
+              border-bottom: 2px solid #000000;
+            }
+            
+            .header h1 {
+              font-size: 20px;
+              font-weight: 700;
+              color: #000000;
+              margin-bottom: 5px;
+              text-transform: uppercase;
+            }
+            
+            .header h2 {
+              font-size: 16px;
+              font-weight: 400;
+              color: #333333;
+              margin-bottom: 15px;
+            }
+            
+            .header-info {
+              display: grid;
+              grid-template-columns: repeat(3, 1fr);
+              gap: 10px;
+              margin-top: 15px;
+              text-align: left;
+            }
+            
+            .info-item {
+              padding: 8px;
+              border: 1px solid #dddddd;
+              border-radius: 4px;
+              background: #f9f9f9;
+            }
+            
+            .info-label {
+              font-size: 10px;
+              color: #666666;
+              font-weight: 500;
+              margin-bottom: 3px;
+              display: block;
+            }
+            
+            .info-value {
+              font-size: 12px;
+              color: #000000;
+              font-weight: 600;
+            }
+            
+            /* Section Titles */
+            .section-title {
+              font-size: 14px;
+              font-weight: 600;
+              color: #000000;
+              padding: 8px 0;
+              margin: 20px 0 10px 0;
+              border-bottom: 1px solid #000000;
+              text-transform: uppercase;
+            }
+            
+            /* Summary Stats */
+            .summary-stats {
+              display: grid;
+              grid-template-columns: repeat(4, 1fr);
+              gap: 10px;
+              margin-bottom: 20px;
+            }
+            
+            .stat-item {
+              border: 1px solid #dddddd;
+              border-radius: 4px;
+              padding: 12px;
+              text-align: center;
+              background: #ffffff;
+            }
+            
+            .stat-title {
+              font-size: 10px;
+              color: #666666;
+              font-weight: 500;
+              margin-bottom: 5px;
+              display: block;
+              text-transform: uppercase;
+            }
+            
+            .stat-value {
+              font-size: 16px;
+              font-weight: 700;
+              color: #000000;
+              display: block;
+            }
+            
+            .stat-note {
+              font-size: 9px;
+              color: #888888;
+              margin-top: 3px;
+              display: block;
+            }
+            
+            /* Tables */
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin: 15px 0;
+              font-size: 11px;
+              border: 1px solid #dddddd;
+            }
+            
+            th {
+              background: #f5f5f5;
+              color: #000000;
+              font-weight: 600;
+              padding: 8px;
+              text-align: left;
+              border-bottom: 2px solid #000000;
+              border-right: 1px solid #dddddd;
+              text-transform: uppercase;
+            }
+            
+            td {
+              padding: 8px;
+              border-bottom: 1px solid #dddddd;
+              border-right: 1px solid #dddddd;
+              vertical-align: top;
+            }
+            
+            tr:last-child td {
+              border-bottom: none;
+            }
+            
+            td:last-child, th:last-child {
+              border-right: none;
+            }
+            
+            tfoot tr {
+              background: #f5f5f5;
+              font-weight: 600;
+            }
+            
+            tfoot td {
+              border-top: 2px solid #000000;
+            }
+            
+            /* Table Numbers */
+            .text-right {
+              text-align: right;
+            }
+            
+            .text-center {
+              text-align: center;
+            }
+            
+            .text-left {
+              text-align: left;
+            }
+            
+            /* Type Labels */
+            .type-label {
+              display: inline-block;
+              padding: 2px 8px;
+              border-radius: 3px;
+              font-size: 9px;
+              font-weight: 500;
+              border: 1px solid #cccccc;
+              background: #ffffff;
+            }
+            
+            /* Divider */
+            .divider {
+              height: 1px;
+              background: #dddddd;
+              margin: 20px 0;
+            }
+            
+            /* Summary Box */
+            .summary-box {
+              border: 1px solid #dddddd;
+              border-radius: 4px;
+              padding: 15px;
+              margin: 15px 0;
+              background: #f9f9f9;
+            }
+            
+            .summary-row {
+              display: grid;
+              grid-template-columns: repeat(2, 1fr);
+              gap: 15px;
+              margin-bottom: 10px;
+            }
+            
+            .summary-item h4 {
+              font-size: 11px;
+              color: #666666;
+              font-weight: 500;
+              margin-bottom: 5px;
+            }
+            
+            .summary-item p {
+              font-size: 13px;
+              font-weight: 600;
+              color: #000000;
+            }
+            
+            /* Footer */
+            .footer {
+              margin-top: 30px;
+              padding-top: 15px;
+              border-top: 1px solid #dddddd;
+              text-align: center;
+              color: #666666;
+              font-size: 10px;
+            }
+            
+            .footer p {
+              margin-bottom: 3px;
+            }
+            
+            /* Print Styles */
+            @media print {
+              body {
+                padding: 10px;
+              }
+              
+              .container {
+                padding: 0;
+              }
+              
+              .no-print {
+                display: none;
+              }
+            }
+            
+            /* Page Break */
+            .page-break {
+              page-break-before: always;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <!-- Header -->
             <div class="header">
-              <h1>EATOPIA - LAPORAN PENJUALAN</h1>
-              <p><strong>Periode:</strong> ${startDate} hingga ${endDate}</p>
-              <p><strong>Dibuat pada:</strong> ${new Date(getIndonesiaTime()).toLocaleString('id-ID')}</p>
+              <h1>LAPORAN PENJUALAN</h1>
+              <h2>EATOPIA COFFEE SHOP</h2>
+              
+              <div class="header-info">
+                <div class="info-item">
+                  <span class="info-label">Periode</span>
+                  <span class="info-value">${startDate} - ${endDate}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">Dibuat Pada</span>
+                  <span class="info-value">${new Date(getIndonesiaTime()).toLocaleString('id-ID', { 
+                    day: 'numeric',
+                    month: 'short',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">Durasi</span>
+                  <span class="info-value">${Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24)) + 1} hari</span>
+                </div>
+              </div>
             </div>
             
-            <div class="summary">
-              <h2>Ringkasan Detail</h2>
-              <div class="stat-grid">
-                <div class="stat-item">
-                  <strong>Total Revenue:</strong><br>
-                  Rp ${reportData?.revenue.toLocaleString('id-ID')}
-                </div>
-                <div class="stat-item">
-                  <strong>Total Orders:</strong><br>
-                  ${reportData?.orders} transaksi
-                </div>
-                <div class="stat-item">
-                  <strong>Total Quantity Terjual:</strong><br>
-                  ${reportData?.totalQuantitySold} items
-                </div>
-                <div class="stat-item">
-                  <strong>Produk Unik Terjual:</strong><br>
-                  ${reportData?.uniqueProductsSold} produk
-                </div>
-                <div class="stat-item">
-                  <strong>Average Order Value:</strong><br>
-                  Rp ${reportData?.averageOrderValue.toLocaleString('id-ID')}
-                </div>
-                <div class="stat-item">
-                  <strong>Best Selling Product:</strong><br>
-                  ${reportData?.bestSellingProduct} (${reportData?.bestSellingProductQuantity} pcs)
-                </div>
+            <!-- Summary Stats -->
+            <div class="summary-stats">
+              <div class="stat-item">
+                <span class="stat-title">Total Revenue</span>
+                <span class="stat-value">Rp ${totalRevenue.toLocaleString('id-ID')}</span>
+                <span class="stat-note">${totalOrders} transaksi</span>
+              </div>
+              
+              <div class="stat-item">
+                <span class="stat-title">Total Cups</span>
+                <span class="stat-value">${totalCups}</span>
+                <span class="stat-note">cups terjual</span>
+              </div>
+              
+              <div class="stat-item">
+                <span class="stat-title">Total Snack</span>
+                <span class="stat-value">${totalSnack}</span>
+                <span class="stat-note">pcs terjual</span>
+              </div>
+              
+              <div class="stat-item">
+                <span class="stat-title">Best Seller</span>
+                <span class="stat-value">${bestSeller.length > 12 ? bestSeller.substring(0, 12) + '...' : bestSeller}</span>
+                <span class="stat-note">${bestSellerQty} pcs terjual</span>
               </div>
             </div>
-
-            <div class="section">
-              <div class="section-title">
-                <h2>Top 10 Products by Revenue</h2>
-              </div>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Product</th>
-                    <th>Category</th>
-                    <th>Quantity Sold</th>
-                    <th>Average Price</th>
-                    <th>Revenue</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${productSales.map(p => `
+            
+            <div class="divider"></div>
+            
+            <!-- Products Table -->
+            <div class="section-title">Produk Terlaris (Berdasarkan Revenue)</div>
+            
+            <table>
+              <thead>
+                <tr>
+                  <th width="5%">No</th>
+                  <th width="25%">Nama Produk</th>
+                  <th width="15%">Kategori</th>
+                  <th width="10%" class="text-center">Quantity</th>
+                  <th width="15%" class="text-right">Harga Rata</th>
+                  <th width="20%" class="text-right">Revenue</th>
+                  <th width="10%" class="text-center">%</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${productSales.map((product, index) => {
+                  const percentage = totalRevenue > 0 ? (product.total_revenue / totalRevenue * 100).toFixed(1) : '0.0';
+                  return `
                     <tr>
-                      <td>${p.product_name}</td>
-                      <td>${p.category}</td>
-                      <td>${p.quantity_sold} pcs</td>
-                      <td>Rp ${p.average_price?.toLocaleString('id-ID') || '0'}</td>
-                      <td>Rp ${p.total_revenue.toLocaleString('id-ID')}</td>
+                      <td class="text-center">${index + 1}</td>
+                      <td>${product.product_name}</td>
+                      <td>${product.category}</td>
+                      <td class="text-center">${product.quantity_sold} pcs</td>
+                      <td class="text-right">Rp ${product.average_price?.toLocaleString('id-ID') || '0'}</td>
+                      <td class="text-right">Rp ${product.total_revenue.toLocaleString('id-ID')}</td>
+                      <td class="text-center">${percentage}%</td>
                     </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-            </div>
-
-            <div class="section">
-              <div class="section-title">
-                <h2>Category Performance</h2>
-              </div>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Category</th>
-                    <th>Quantity</th>
-                    <th>Revenue</th>
-                    <th>Percentage</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${categorySales.map(c => `
+                  `;
+                }).join('')}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td colspan="3"><strong>TOTAL</strong></td>
+                  <td class="text-center"><strong>${productSales.reduce((sum, p) => sum + p.quantity_sold, 0)} pcs</strong></td>
+                  <td class="text-right"><strong>Rp ${Math.round(productSales.reduce((sum, p) => sum + (p.average_price || 0), 0) / productSales.length).toLocaleString('id-ID')}</strong></td>
+                  <td class="text-right"><strong>Rp ${productSales.reduce((sum, p) => sum + p.total_revenue, 0).toLocaleString('id-ID')}</strong></td>
+                  <td class="text-center"><strong>100%</strong></td>
+                </tr>
+              </tfoot>
+            </table>
+            
+            <div class="divider"></div>
+            
+            <!-- Category Table -->
+            <div class="section-title">Kinerja Kategori</div>
+            
+            <table>
+              <thead>
+                <tr>
+                  <th width="5%">No</th>
+                  <th width="30%">Kategori</th>
+                  <th width="15%">Tipe</th>
+                  <th width="15%" class="text-center">Quantity</th>
+                  <th width="25%" class="text-right">Revenue</th>
+                  <th width="10%" class="text-center">%</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${categorySales.map((category, index) => {
+                  const isSnack = category.category === 'Snacks';
+                  const isDrink = ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic', 'Mocktail', 'Non-Coffe'].includes(category.category);
+                  const type = isSnack ? 'Snack' : isDrink ? 'Minuman' : 'Lainnya';
+                  
+                  return `
                     <tr>
-                      <td>${c.category}</td>
-                      <td>${c.quantity_sold} pcs</td>
-                      <td>Rp ${c.total_revenue.toLocaleString('id-ID')}</td>
-                      <td>${c.percentage.toFixed(1)}%</td>
+                      <td class="text-center">${index + 1}</td>
+                      <td>${category.category}</td>
+                      <td><span class="type-label">${type}</span></td>
+                      <td class="text-center">${category.quantity_sold} pcs</td>
+                      <td class="text-right">Rp ${category.total_revenue.toLocaleString('id-ID')}</td>
+                      <td class="text-center">${category.percentage.toFixed(1)}%</td>
                     </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-            </div>
-
-            <div class="section">
-              <div class="section-title">
-                <h2>Sales Trend</h2>
+                  `;
+                }).join('')}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td colspan="3"><strong>TOTAL KATEGORI</strong></td>
+                  <td class="text-center"><strong>${categoryTotalQty} pcs</strong></td>
+                  <td class="text-right"><strong>Rp ${categoryTotalRevenue.toLocaleString('id-ID')}</strong></td>
+                  <td class="text-center"><strong>100%</strong></td>
+                </tr>
+              </tfoot>
+            </table>
+            
+            <!-- Summary Box -->
+            <div class="summary-box">
+              <div class="summary-row">
+                <div class="summary-item">
+                  <h4>Total Quantity Terjual</h4>
+                  <p>${totalQuantity} items (${totalCups} cups + ${totalSnack} snack)</p>
+                </div>
+                <div class="summary-item">
+                  <h4>Produk Unik Terjual</h4>
+                  <p>${uniqueProducts} produk</p>
+                </div>
               </div>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Revenue</th>
-                    <th>Orders</th>
-                    <th>Quantity</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${timeSeriesData.map(d => `
-                    <tr>
-                      <td>${d.date}</td>
-                      <td>Rp ${d.revenue.toLocaleString('id-ID')}</td>
-                      <td>${d.orders}</td>
-                      <td>${d.quantity} pcs</td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
+              <div class="summary-row">
+                <div class="summary-item">
+                  <h4>Kategori Terlaris</h4>
+                  <p>${categorySales[0]?.category || '-'}</p>
+                </div>
+                <div class="summary-item">
+                  <h4>Persentase Minuman</h4>
+                  <p>${totalCups > 0 ? ((totalCups/totalQuantity)*100).toFixed(1) : '0'}% dari total</p>
+                </div>
+              </div>
             </div>
-          </body>
-        </html>
-      `)
-      printWindow.document.close()
-      printWindow.print()
-    }
+            
+            <!-- Time Series Table -->
+            <div class="section-title">Trend Penjualan Harian</div>
+            
+            <table>
+              <thead>
+                <tr>
+                  <th width="20%">Tanggal</th>
+                  <th width="25%" class="text-right">Revenue</th>
+                  <th width="15%" class="text-center">Orders</th>
+                  <th width="20%" class="text-center">Quantity</th>
+                  <th width="20%" class="text-right">Revenue per Order</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${timeSeriesData.map((day, index) => {
+                  const revenuePerOrder = day.orders > 0 ? (day.revenue / day.orders) : 0;
+                  return `
+                    <tr>
+                      <td>${day.date}</td>
+                      <td class="text-right">Rp ${day.revenue.toLocaleString('id-ID')}</td>
+                      <td class="text-center">${day.orders}</td>
+                      <td class="text-center">${day.quantity} pcs</td>
+                      <td class="text-right">Rp ${revenuePerOrder.toLocaleString('id-ID')}</td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td><strong>TOTAL</strong></td>
+                  <td class="text-right"><strong>Rp ${timeSeriesData.reduce((sum, day) => sum + day.revenue, 0).toLocaleString('id-ID')}</strong></td>
+                  <td class="text-center"><strong>${timeSeriesData.reduce((sum, day) => sum + day.orders, 0)}</strong></td>
+                  <td class="text-center"><strong>${timeSeriesData.reduce((sum, day) => sum + day.quantity, 0)} pcs</strong></td>
+                  <td class="text-right"><strong>Rp ${(totalOrders > 0 ? totalRevenue/totalOrders : 0).toLocaleString('id-ID')}</strong></td>
+                </tr>
+              </tfoot>
+            </table>
+            
+            <!-- Footer -->
+            <div class="footer">
+              <p>Laporan ini dibuat secara otomatis oleh sistem Eatopia</p>
+              <p>EATOPIA COFFEE SHOP • Document ID: SR-${startDate.replace(/-/g, '')}-${endDate.replace(/-/g, '')}</p>
+              <p>Generated: ${new Date(getIndonesiaTime()).toLocaleString('id-ID', { 
+                hour: '2-digit', 
+                minute: '2-digit', 
+                second: '2-digit' 
+              })}</p>
+            </div>
+          </div>
+          
+          <script>
+            // Auto-print after content loads
+            window.onload = function() {
+              setTimeout(function() {
+                window.print();
+              }, 500);
+            }
+          </script>
+        </body>
+      </html>
+    `)
+    printWindow.document.close()
   }
+}
 
   // PERBAIKAN: Fungsi quick date ranges dengan timezone Jakarta yang benar
   const quickDateRanges = {
@@ -627,7 +1023,7 @@ export default function ReportsPage() {
       firstDay.setDate(today.getDate() - today.getDay()); // Minggu
       const lastDay = new Date(today);
       lastDay.setDate(today.getDate() - today.getDay() + 6); // Sabtu
-      
+
       return {
         start: formatDateForInput(firstDay),
         end: formatDateForInput(lastDay)
@@ -686,11 +1082,11 @@ export default function ReportsPage() {
           <p className="font-semibold">{`${label}`}</p>
           {payload.map((entry: any, index: number) => (
             <p key={index} style={{ color: entry.color }}>
-              {entry.name}: {entry.name.includes('Revenue') || entry.name.includes('Rp') 
-                ? `Rp ${Number(entry.value).toLocaleString('id-ID')}` 
+              {entry.name}: {entry.name.includes('Revenue') || entry.name.includes('Rp')
+                ? `Rp ${Number(entry.value).toLocaleString('id-ID')}`
                 : entry.name.includes('Quantity') || entry.name.includes('Orders')
-                ? `${entry.value} pcs`
-                : entry.value
+                  ? `${entry.value} pcs`
+                  : entry.value
               }
             </p>
           ))}
@@ -855,12 +1251,12 @@ export default function ReportsPage() {
               <div className="bg-white rounded-lg shadow p-4 sm:p-6">
                 <div className="flex items-center">
                   <div className="h-8 w-8 sm:h-10 sm:w-10 bg-blue-100 rounded-full flex items-center justify-center">
-                    <Package className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600" />
+                    <Coffee className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600" />
                   </div>
                   <div className="ml-3 sm:ml-4">
-                    <p className="text-xs sm:text-sm font-medium text-gray-600">Total Quantity</p>
+                    <p className="text-xs sm:text-sm font-medium text-gray-600">Total Cups</p>
                     <p className="text-lg sm:text-xl font-bold text-gray-900">
-                      {reportData.totalQuantitySold} pcs
+                      {reportData.totalCups} cups
                     </p>
                   </div>
                 </div>
@@ -868,12 +1264,14 @@ export default function ReportsPage() {
 
               <div className="bg-white rounded-lg shadow p-4 sm:p-6">
                 <div className="flex items-center">
-                  <div className="h-8 w-8 sm:h-10 sm:w-10 bg-purple-100 rounded-full flex items-center justify-center">
-                    <Users className="h-4 w-4 sm:h-5 sm:w-5 text-purple-600" />
+                  <div className="h-8 w-8 sm:h-10 sm:w-10 bg-orange-100 rounded-full flex items-center justify-center">
+                    <Package className="h-4 w-4 sm:h-5 sm:w-5 text-orange-600" />
                   </div>
                   <div className="ml-3 sm:ml-4">
-                    <p className="text-xs sm:text-sm font-medium text-gray-600">Total Orders</p>
-                    <p className="text-lg sm:text-xl font-bold text-gray-900">{reportData.orders}</p>
+                    <p className="text-xs sm:text-sm font-medium text-gray-600">Total Snack</p>
+                    <p className="text-lg sm:text-xl font-bold text-gray-900">
+                      {reportData.totalSnack} pcs
+                    </p>
                   </div>
                 </div>
               </div>
@@ -897,20 +1295,15 @@ export default function ReportsPage() {
 
           {/* Additional Stats */}
           {reportData && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-6 sm:mb-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mb-6 sm:mb-8">
               <div className="bg-white rounded-lg shadow p-4">
                 <div className="text-center">
-                  <p className="text-sm font-medium text-gray-600">Avg Order Value</p>
+                  <p className="text-sm font-medium text-gray-600">Total Quantity</p>
                   <p className="text-lg font-bold text-gray-900">
-                    Rp {reportData.averageOrderValue.toLocaleString('id-ID')}
+                    {reportData.totalCups + reportData.totalSnack} items
                   </p>
-                </div>
-              </div>
-              <div className="bg-white rounded-lg shadow p-4">
-                <div className="text-center">
-                  <p className="text-sm font-medium text-gray-600">Unique Products</p>
-                  <p className="text-lg font-bold text-gray-900">
-                    {reportData.uniqueProductsSold} produk
+                  <p className="text-xs text-gray-500 mt-1">
+                    ({reportData.totalCups} cups + {reportData.totalSnack} snack)
                   </p>
                 </div>
               </div>
@@ -984,7 +1377,7 @@ export default function ReportsPage() {
                 Quantity Trend
               </h3>
               <ResponsiveContainer width="100%" height={isMobile ? 250 : 300}>
-                <BarChart 
+                <BarChart
                   data={timeSeriesData}
                   margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
                 >
@@ -1097,16 +1490,16 @@ export default function ReportsPage() {
                   </span>
                 )}
               </h3>
-              
+
               <ResponsiveContainer width="100%" height={isMobile ? 320 : 380}>
                 <BarChart
                   data={productSales}
                   layout="vertical"
-                  margin={{ 
-                    top: 10, 
-                    right: 30, 
-                    left: isMobile ? 20 : 10, 
-                    bottom: 10 
+                  margin={{
+                    top: 10,
+                    right: 30,
+                    left: isMobile ? 10 : 30,
+                    bottom: 10
                   }}
                 >
                   <defs>
@@ -1115,14 +1508,14 @@ export default function ReportsPage() {
                       <stop offset="100%" stopColor="#f59e0b" />
                     </linearGradient>
                   </defs>
-                  
-                  <CartesianGrid 
-                    strokeDasharray="3 3" 
-                    stroke="#f3f4f6" 
+
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="#f3f4f6"
                     horizontal={true}
                     vertical={false}
                   />
-                  
+
                   <XAxis
                     type="number"
                     tickFormatter={formatYAxis}
@@ -1132,12 +1525,12 @@ export default function ReportsPage() {
                     tick={{ fill: '#6b7280' }}
                     tickMargin={10}
                   />
-                  
+
                   <YAxis
                     type="category"
                     dataKey="product_name"
                     width={isMobile ? 110 : 170}
-                    tick={{ 
+                    tick={{
                       fontSize: isMobile ? 11 : 13,
                       fill: '#374151',
                       fontWeight: 500
@@ -1146,7 +1539,7 @@ export default function ReportsPage() {
                     axisLine={{ stroke: '#e5e7eb' }}
                     interval={0}
                   />
-                  
+
                   <Tooltip
                     formatter={(value: number, name: string) => [
                       <div key="tooltip-content" className="text-center">
@@ -1172,7 +1565,7 @@ export default function ReportsPage() {
                       padding: '0'
                     }}
                   />
-                  
+
                   <Bar
                     dataKey="total_revenue"
                     name="Revenue"
@@ -1181,8 +1574,8 @@ export default function ReportsPage() {
                     fill="url(#revenueGradient)"
                   >
                     {productSales.map((entry, index) => (
-                      <Cell 
-                        key={`cell-${index}`} 
+                      <Cell
+                        key={`cell-${index}`}
                         fill={`url(#revenueGradient)`}
                         opacity={0.8 + (index * 0.02)}
                       />
@@ -1190,32 +1583,26 @@ export default function ReportsPage() {
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
-              
+
               {/* Enhanced Summary Stats */}
               {productSales.length > 0 && (
                 <div className="mt-6 pt-4 border-t border-gray-200">
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
+                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
                     <div className="bg-linear-to-r from-amber-50 to-orange-50 p-3 rounded-lg border border-amber-200">
                       <p className="text-gray-600 font-medium text-xs">TOTAL REVENUE</p>
                       <p className="text-amber-700 font-bold text-lg">
                         Rp {productSales.reduce((sum, product) => sum + product.total_revenue, 0).toLocaleString('id-ID')}
                       </p>
                     </div>
-                    
+
                     <div className="bg-linear-to-r from-green-50 to-emerald-50 p-3 rounded-lg border border-green-200">
                       <p className="text-gray-600 font-medium text-xs">TOTAL QUANTITY</p>
                       <p className="text-green-700 font-bold text-lg">
                         {productSales.reduce((sum, product) => sum + product.quantity_sold, 0).toLocaleString('id-ID')} pcs
                       </p>
                     </div>
-                    
-                    <div className="bg-linear-to-r from-blue-50 to-cyan-50 p-3 rounded-lg border border-blue-200">
-                      <p className="text-gray-600 font-medium text-xs">AVG PRICE</p>
-                      <p className="text-blue-700 font-bold text-lg">
-                        Rp {Math.round(productSales.reduce((sum, product) => sum + (product.average_price || 0), 0) / productSales.length).toLocaleString('id-ID')}
-                      </p>
-                    </div>
-                    
+
+
                     <div className="bg-linear-to-r from-purple-50 to-violet-50 p-3 rounded-lg border border-purple-200">
                       <p className="text-gray-600 font-medium text-xs">TOP PRODUCT</p>
                       <p className="text-purple-700 font-bold text-sm truncate" title={productSales[0]?.product_name}>
@@ -1246,7 +1633,6 @@ export default function ReportsPage() {
                         <th className="text-left py-2 text-xs sm:text-sm">Product Name</th>
                         <th className="text-left py-2 text-xs sm:text-sm">Category</th>
                         <th className="text-left py-2 text-xs sm:text-sm">Quantity</th>
-                        <th className="text-left py-2 text-xs sm:text-sm">Avg Price</th>
                         <th className="text-left py-2 text-xs sm:text-sm">Revenue</th>
                       </tr>
                     </thead>
@@ -1258,11 +1644,23 @@ export default function ReportsPage() {
                           </td>
                           <td className="py-2 sm:py-3 text-xs sm:text-sm">{product.category}</td>
                           <td className="py-2 sm:py-3 text-xs sm:text-sm">{product.quantity_sold} pcs</td>
-                          <td className="py-2 sm:py-3 text-xs sm:text-sm">Rp {product.average_price?.toLocaleString('id-ID') || '0'}</td>
                           <td className="py-2 sm:py-3 text-xs sm:text-sm">Rp {product.total_revenue.toLocaleString('id-ID')}</td>
                         </tr>
                       ))}
                     </tbody>
+                    {categorySales.length > 0 && (
+                      <tfoot>
+                        <tr className="bg-gray-50 font-semibold">
+                          <td colSpan={2} className="py-2 sm:py-3 text-xs sm:text-sm">TOTAL</td>
+                          <td className="py-2 sm:py-3 text-xs sm:text-sm">
+                            {categorySales.reduce((sum, cat) => sum + cat.quantity_sold, 0)} pcs
+                          </td>
+                          <td className="py-2 sm:py-3 text-xs sm:text-sm">
+                            Rp {categorySales.reduce((sum, cat) => sum + cat.total_revenue, 0).toLocaleString('id-ID')}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    )}
                   </table>
                 </div>
               </div>
@@ -1271,7 +1669,12 @@ export default function ReportsPage() {
             {/* Category Sales Table */}
             <div className="bg-white rounded-lg shadow">
               <div className="p-4 sm:p-6 border-b">
-                <h3 className="text-base sm:text-lg font-semibold">Category Performance</h3>
+                <div className="flex justify-between items-center">
+                  <h3 className="text-base sm:text-lg font-semibold">Category Performance</h3>
+                  <div className="text-sm text-gray-600">
+                    Total: {categorySales.reduce((sum, cat) => sum + cat.quantity_sold, 0)} items
+                  </div>
+                </div>
               </div>
               <div className="p-2 sm:p-4 lg:p-6">
                 <div className="overflow-x-auto">
@@ -1279,23 +1682,103 @@ export default function ReportsPage() {
                     <thead>
                       <tr className="border-b">
                         <th className="text-left py-2 text-xs sm:text-sm">Category</th>
+                        <th className="text-left py-2 text-xs sm:text-sm">Type</th>
                         <th className="text-left py-2 text-xs sm:text-sm">Quantity</th>
                         <th className="text-left py-2 text-xs sm:text-sm">Revenue</th>
                         <th className="text-left py-2 text-xs sm:text-sm">Percentage</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {categorySales.map((category: CategorySales, index: number) => (
-                        <tr key={index} className="border-b hover:bg-gray-50">
-                          <td className="py-2 sm:py-3 text-xs sm:text-sm">{category.category}</td>
-                          <td className="py-2 sm:py-3 text-xs sm:text-sm">{category.quantity_sold} pcs</td>
-                          <td className="py-2 sm:py-3 text-xs sm:text-sm">Rp {category.total_revenue.toLocaleString('id-ID')}</td>
-                          <td className="py-2 sm:py-3 text-xs sm:text-sm">{category.percentage.toFixed(1)}%</td>
-                        </tr>
-                      ))}
+                      {categorySales.map((category: CategorySales, index: number) => {
+                        const isSnack = category.category === 'Snacks';
+                        const isDrink = ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic', 'Mocktail', 'Non-Coffe'].includes(category.category);
+                        const type = isSnack ? 'Snack' : isDrink ? 'Drink' : 'Other';
+
+                        return (
+                          <tr key={index} className="border-b hover:bg-gray-50">
+                            <td className="py-2 sm:py-3 text-xs sm:text-sm">
+                              <div className="flex items-center">
+                                {isSnack ? (
+                                  <Package className="h-3 w-3 mr-2 text-orange-500" />
+                                ) : isDrink ? (
+                                  <Coffee className="h-3 w-3 mr-2 text-blue-500" />
+                                ) : null}
+                                {category.category}
+                              </div>
+                            </td>
+                            <td className="py-2 sm:py-3 text-xs sm:text-sm">
+                              <span className={`px-2 py-1 rounded-full text-xs ${type === 'Drink' ? 'bg-blue-100 text-blue-800' :
+                                  type === 'Snack' ? 'bg-orange-100 text-orange-800' :
+                                    'bg-gray-100 text-gray-800'
+                                }`}>
+                                {type}
+                              </span>
+                            </td>
+                            <td className="py-2 sm:py-3 text-xs sm:text-sm">{category.quantity_sold} pcs</td>
+                            <td className="py-2 sm:py-3 text-xs sm:text-sm">Rp {category.total_revenue.toLocaleString('id-ID')}</td>
+                            <td className="py-2 sm:py-3 text-xs sm:text-sm">{category.percentage.toFixed(1)}%</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
+                    {/* Summary Row */}
+                    {categorySales.length > 0 && (
+                      <tfoot>
+                        <tr className="bg-gray-50 font-semibold">
+                          <td colSpan={2} className="py-2 sm:py-3 text-xs sm:text-sm">TOTAL</td>
+                          <td className="py-2 sm:py-3 text-xs sm:text-sm">
+                            {categorySales.reduce((sum, cat) => sum + cat.quantity_sold, 0)} pcs
+                          </td>
+                          <td className="py-2 sm:py-3 text-xs sm:text-sm">
+                            Rp {categorySales.reduce((sum, cat) => sum + cat.total_revenue, 0).toLocaleString('id-ID')}
+                          </td>
+                          <td className="py-2 sm:py-3 text-xs sm:text-sm">100%</td>
+                        </tr>
+                      </tfoot>
+                    )}
                   </table>
                 </div>
+
+                {/* Summary Breakdown */}
+                {categorySales.length > 0 && (
+                  <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-gray-600">Total Cups</p>
+                          <p className="text-lg font-bold text-blue-700">
+                            {reportData?.totalCups || 0} cups
+                          </p>
+                        </div>
+                        <Coffee className="h-8 w-8 text-blue-600" />
+                      </div>
+                    </div>
+
+                    <div className="bg-orange-50 p-4 rounded-lg border border-orange-200">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-gray-600">Total Snack</p>
+                          <p className="text-lg font-bold text-orange-700">
+                            {reportData?.totalSnack || 0} pcs
+                          </p>
+                        </div>
+                        <Package className="h-8 w-8 text-orange-600" />
+                      </div>
+                    </div>
+
+                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-gray-600">Total Quantity</p>
+                          <p className="text-lg font-bold text-gray-700">
+                            {(reportData?.totalCups || 0) + (reportData?.totalSnack || 0)} items
+                          </p>
+                        </div>
+                        <Users className="h-8 w-8 text-gray-600" />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
