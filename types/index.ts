@@ -48,15 +48,20 @@ export interface CreateOrderData {
   }[]
 }
 
-
 export interface ReportData {
-  period: string
-  revenue: number
-  orders: number
-  averageOrderValue: number
-  bestSellingProduct: string
-  bestSellingCategory: string
+  period: string;
+  revenue: number;
+  orders: number;
+  averageOrderValue: number;
+  bestSellingProduct: string;
+  bestSellingCategory: string;
+  totalCups: number;
+  totalSnack: number;
+  bestSellingProductQuantity: number;
+  bestSellingCategoryQuantity: number;
+  uniqueProductsSold: number;
 }
+
 
 export interface PieDataItem {
   name: string;
