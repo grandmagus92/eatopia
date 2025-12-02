@@ -1105,7 +1105,7 @@ export default function ReportsPage() {
                   margin={{ 
                     top: 10, 
                     right: 30, 
-                    left: isMobile ? 120 : 180, 
+                    left: isMobile ? 20 : 50, 
                     bottom: 10 
                   }}
                 >
