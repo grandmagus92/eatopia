@@ -961,7 +961,7 @@ export default function OrdersPage() {
           }
           .store-name {
             font-weight: bold;
-            font-size: ${printerConfig.fontSize === 2 ? '16px' : printerConfig.fontSize === 3 ? '18px' : '14px'};
+            font-size: ${printerConfig.fontSize === 2 ? '18px' : printerConfig.fontSize === 3 ? '20px' : '16px'};
           }
           .order-info {
             margin: 8px 0;
@@ -988,6 +988,8 @@ export default function OrdersPage() {
             text-align: right;
           }
           .total {
+            display :flex;
+            justify-content: space-between;
             font-weight: bold;
             text-align: center;
             margin: 10px 0;
@@ -1037,9 +1039,6 @@ export default function OrdersPage() {
                 <div class="item-qty">${item.quantity}x</div>
                 <div class="item-price">${(item.price * item.quantity).toLocaleString('id-ID')}</div>
               </div>
-              <div style="text-align: right; font-size: 10px; margin-bottom: 5px;">
-                @ ${item.price.toLocaleString('id-ID')}
-              </div>
             `).join('') :
         '<div>Tidak ada item</div>'
       }
@@ -1048,7 +1047,12 @@ export default function OrdersPage() {
         <div class="separator"></div>
         
         <div class="total">
-          TOTAL: Rp ${order.total_amount.toLocaleString('id-ID')}
+            <div>
+                  TOTAL: Rp 
+            </div>
+            <div>
+            ${order.total_amount.toLocaleString('id-ID')}
+            </div>
         </div>
         
         <div style="margin: 8px 0;">
