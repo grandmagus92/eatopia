@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { ReportData, ProductSales, CategorySales, TimeSeriesData, PieDataItem } from '@/types'
-import { Calendar, Download, Filter, BarChart3, PieChart, TrendingUp, Menu, X, Package, Users, Star, Coffee } from 'lucide-react'
+import { Calendar, Download, Filter, BarChart3, PieChart, TrendingUp, Menu, X, Package, Users, Star, Coffee, ChevronLeft, ChevronRight } from 'lucide-react'
 import {
   BarChart, Bar,
   LineChart, Line,
@@ -81,6 +81,10 @@ export default function ReportsPage() {
   const [isMobile, setIsMobile] = useState(false)
   const [showMobileFilters, setShowMobileFilters] = useState(false)
 
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1)
+  const [itemsPerPage] = useState(10) // Default tetap 10 data per halaman
+
   // Detect screen size
   useEffect(() => {
     const checkScreenSize = () => {
@@ -108,6 +112,11 @@ export default function ReportsPage() {
       generateReports()
     }
   }, [startDate, endDate, timeRange])
+
+  // Reset pagination ke halaman 1 ketika data berubah
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [productSales])
 
   const generateReports = async () => {
     setLoading(true)
@@ -270,7 +279,6 @@ export default function ReportsPage() {
 
     const sortedProducts = Array.from(productMap.values())
       .sort((a: any, b: any) => b.total_revenue - a.total_revenue)
-      .slice(0, 10)
 
     setProductSales(sortedProducts)
 
@@ -395,117 +403,129 @@ export default function ReportsPage() {
     setTimeSeriesData(timeSeriesArray)
   }
 
-  const exportToXLS = () => {
-    try {
-      // Create workbook
-      const workbook = XLSX.utils.book_new()
+  // Pagination logic untuk product sales
+  const indexOfLastItem = currentPage * itemsPerPage
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage
+  const currentProductSales = productSales.slice(indexOfFirstItem, indexOfLastItem)
+  const totalPages = Math.ceil(productSales.length / itemsPerPage)
 
-      // Worksheet 1: Summary
-      const summaryData = [
-        ['LAPORAN PENJUALAN - COFFEE POS'],
-        [`Periode: ${startDate} hingga ${endDate}`],
-        [],
-        ['SUMMARY'],
-        ['Total Revenue', `Rp ${reportData?.revenue.toLocaleString('id-ID')}`],
-        ['Total Orders', reportData?.orders],
-        ['Total Cups Terjual', reportData?.totalCups || 0],
-        ['Total Snack Terjual', reportData?.totalSnack || 0],
-        ['Total Quantity Terjual', (reportData?.totalCups || 0) + (reportData?.totalSnack || 0)],
-        ['Produk Unik Terjual', reportData?.uniqueProductsSold],
-        ['Average Order Value', `Rp ${reportData?.averageOrderValue.toLocaleString('id-ID')}`],
-        ['Best Selling Product', `${reportData?.bestSellingProduct} (${reportData?.bestSellingProductQuantity} pcs)`],
-        ['Best Selling Category', `${reportData?.bestSellingCategory} (${reportData?.bestSellingCategoryQuantity} pcs)`],
-        [],
-        ['Generated on', new Date(getIndonesiaTime()).toLocaleString('id-ID')]
-      ]
+  // Pagination controls
+  const goToPage = (pageNumber: number) => {
+    setCurrentPage(pageNumber)
+  }
 
-      const summarySheet = XLSX.utils.aoa_to_sheet(summaryData)
-      XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary')
-
-      // Worksheet 2: Product Sales
-      const productData = [
-        ['PRODUCT SALES'],
-        ['Product Name', 'Category', 'Quantity Sold', 'Average Price', 'Revenue (Rp)'],
-        ...productSales.map(product => [
-          product.product_name,
-          product.category,
-          product.quantity_sold,
-          `Rp ${product.average_price?.toLocaleString('id-ID') || '0'}`,
-          product.total_revenue
-        ])
-      ]
-
-      const productSheet = XLSX.utils.aoa_to_sheet(productData)
-      XLSX.utils.book_append_sheet(workbook, productSheet, 'Product Sales')
-
-      // Worksheet 3: Category Sales
-      const categoryData = [
-        ['CATEGORY SALES'],
-        ['Category', 'Type', 'Quantity Sold', 'Revenue (Rp)', 'Percentage (%)'],
-        ...categorySales.map(category => {
-          const isSnack = category.category === 'Snacks';
-          const isDrink = ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic', 'Mocktail', 'Non-Coffe'].includes(category.category);
-          const type = isSnack ? 'Snack' : isDrink ? 'Drink' : 'Other';
-
-          return [
-            category.category,
-            type,
-            category.quantity_sold,
-            category.total_revenue,
-            category.percentage.toFixed(2)
-          ]
-        })
-      ]
-
-      const categorySheet = XLSX.utils.aoa_to_sheet(categoryData)
-      XLSX.utils.book_append_sheet(workbook, categorySheet, 'Category Sales')
-
-      // Worksheet 4: Time Series Data
-      const timeSeriesDataSheet = [
-        ['DAILY SALES TREND'],
-        ['Date', 'Revenue (Rp)', 'Orders', 'Quantity Terjual'],
-        ...timeSeriesData.map(day => [
-          day.date,
-          day.revenue,
-          day.orders,
-          day.quantity
-        ])
-      ]
-
-      const timeSheet = XLSX.utils.aoa_to_sheet(timeSeriesDataSheet)
-      XLSX.utils.book_append_sheet(workbook, timeSheet, 'Sales Trend')
-
-      // Generate filename
-      const fileName = `laporan-penjualan-${startDate}-hingga-${endDate}.xlsx`
-
-      // Export to file
-      XLSX.writeFile(workbook, fileName)
-
-      showToast('success', 'File Excel berhasil diunduh!')
-    } catch (error) {
-      console.error('Error exporting to XLS:', error)
-      showToast('error', 'Gagal mengunduh file Excel')
+  const goToNextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(currentPage + 1)
     }
   }
 
- const exportToPDF = () => {
-  const printWindow = window.open('', '_blank')
-  if (printWindow) {
-    // Calculate summary data for PDF
-    const totalRevenue = reportData?.revenue || 0;
-    const totalCups = reportData?.totalCups || 0;
-    const totalSnack = reportData?.totalSnack || 0;
-    const totalQuantity = totalCups + totalSnack;
-    const totalOrders = reportData?.orders || 0;
-    const bestSeller = reportData?.bestSellingProduct || '-';
-    const bestSellerQty = reportData?.bestSellingProductQuantity || 0;
-    const uniqueProducts = reportData?.uniqueProductsSold || 0;
-    
-    // Calculate category totals
-    const categoryTotalQty = categorySales.reduce((sum, cat) => sum + cat.quantity_sold, 0);
-    const categoryTotalRevenue = categorySales.reduce((sum, cat) => sum + cat.total_revenue, 0);
-    
-    printWindow.document.write(`
+  const goToPrevPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(currentPage - 1)
+    }
+  }
+
+  // Render pagination numbers
+  const renderPaginationNumbers = () => {
+    const pageNumbers = []
+    const maxPageNumbers = isMobile ? 3 : 5
+
+    if (totalPages <= maxPageNumbers) {
+      for (let i = 1; i <= totalPages; i++) {
+        pageNumbers.push(i)
+      }
+    } else {
+      // Always show first page
+      pageNumbers.push(1)
+
+      let start = Math.max(2, currentPage - 1)
+      let end = Math.min(totalPages - 1, currentPage + 1)
+
+      // Adjust if at the beginning
+      if (currentPage <= 2) {
+        end = Math.min(totalPages - 1, 4)
+      }
+
+      // Adjust if at the end
+      if (currentPage >= totalPages - 1) {
+        start = Math.max(2, totalPages - 3)
+      }
+
+      // Add ellipsis after first page if needed
+      if (start > 2) {
+        pageNumbers.push('...')
+      }
+
+      // Add middle pages
+      for (let i = start; i <= end; i++) {
+        pageNumbers.push(i)
+      }
+
+      // Add ellipsis before last page if needed
+      if (end < totalPages - 1) {
+        pageNumbers.push('...')
+      }
+
+      // Always show last page
+      if (totalPages > 1) {
+        pageNumbers.push(totalPages)
+      }
+    }
+
+    return pageNumbers
+  }
+
+  // Fungsi untuk menentukan unit berdasarkan kategori
+  const getQuantityUnit = (category: string) => {
+    const snackCategories = ['Snacks', 'Food'];
+    const drinkCategories = ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic', 'Mocktail', 'Non-Coffe'];
+
+    if (snackCategories.includes(category)) {
+      return 'pcs';
+    } else if (drinkCategories.includes(category)) {
+      return 'cups';
+    } else {
+      return 'pcs'; // Default untuk kategori lain
+    }
+  }
+
+  // Fungsi untuk menampilkan quantity dengan unit yang sesuai
+  const formatQuantity = (quantity: number, category: string) => {
+    const unit = getQuantityUnit(category);
+    return `${quantity} ${unit}`;
+  }
+
+  // Fungsi untuk menampilkan icon berdasarkan kategori
+  const getCategoryIcon = (category: string) => {
+    if (category === 'Snacks' || category === 'Food') {
+      return <Package className="h-3 w-3 mr-2 text-orange-500" />;
+    } else if (['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic', 'Mocktail', 'Non-Coffe'].includes(category)) {
+      return <Coffee className="h-3 w-3 mr-2 text-blue-500" />;
+    } else {
+      return null;
+    }
+  }
+
+  // ... (kode exportToPDF tetap sama)
+  const exportToPDF = () => {
+    const printWindow = window.open('', '_blank')
+    if (printWindow) {
+      // Calculate summary data for PDF
+      const totalRevenue = reportData?.revenue || 0;
+      const totalCups = reportData?.totalCups || 0;
+      const totalSnack = reportData?.totalSnack || 0;
+      const totalQuantity = totalCups + totalSnack;
+      const totalOrders = reportData?.orders || 0;
+      const bestSeller = reportData?.bestSellingProduct || '-';
+      const bestSellerQty = reportData?.bestSellingProductQuantity || 0;
+      const uniqueProducts = reportData?.uniqueProductsSold || 0;
+
+      // Calculate category totals
+      const categoryTotalQty = categorySales.reduce((sum, cat) => sum + cat.quantity_sold, 0);
+      const categoryTotalRevenue = categorySales.reduce((sum, cat) => sum + cat.total_revenue, 0);
+
+      printWindow.document.write(`
       <html>
         <head>
           <title>Laporan Penjualan ${startDate} - ${endDate}</title>
@@ -789,13 +809,13 @@ export default function ReportsPage() {
                 </div>
                 <div class="info-item">
                   <span class="info-label">Dibuat Pada</span>
-                  <span class="info-value">${new Date(getIndonesiaTime()).toLocaleString('id-ID', { 
-                    day: 'numeric',
-                    month: 'short',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })}</span>
+                  <span class="info-value">${new Date(getIndonesiaTime()).toLocaleString('id-ID', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      })}</span>
                 </div>
                 <div class="info-item">
                   <span class="info-label">Durasi</span>
@@ -850,8 +870,8 @@ export default function ReportsPage() {
               </thead>
               <tbody>
                 ${productSales.map((product, index) => {
-                  const percentage = totalRevenue > 0 ? (product.total_revenue / totalRevenue * 100).toFixed(1) : '0.0';
-                  return `
+        const percentage = totalRevenue > 0 ? (product.total_revenue / totalRevenue * 100).toFixed(1) : '0.0';
+        return `
                     <tr>
                       <td class="text-center">${index + 1}</td>
                       <td>${product.product_name}</td>
@@ -862,7 +882,7 @@ export default function ReportsPage() {
                       <td class="text-center">${percentage}%</td>
                     </tr>
                   `;
-                }).join('')}
+      }).join('')}
               </tbody>
               <tfoot>
                 <tr>
@@ -893,11 +913,11 @@ export default function ReportsPage() {
               </thead>
               <tbody>
                 ${categorySales.map((category, index) => {
-                  const isSnack = category.category === 'Snacks';
-                  const isDrink = ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic', 'Mocktail', 'Non-Coffe'].includes(category.category);
-                  const type = isSnack ? 'Snack' : isDrink ? 'Minuman' : 'Lainnya';
-                  
-                  return `
+        const isSnack = category.category === 'Snacks';
+        const isDrink = ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic', 'Mocktail', 'Non-Coffe'].includes(category.category);
+        const type = isSnack ? 'Snack' : isDrink ? 'Minuman' : 'Lainnya';
+
+        return `
                     <tr>
                       <td class="text-center">${index + 1}</td>
                       <td>${category.category}</td>
@@ -907,7 +927,7 @@ export default function ReportsPage() {
                       <td class="text-center">${category.percentage.toFixed(1)}%</td>
                     </tr>
                   `;
-                }).join('')}
+      }).join('')}
               </tbody>
               <tfoot>
                 <tr>
@@ -938,7 +958,7 @@ export default function ReportsPage() {
                 </div>
                 <div class="summary-item">
                   <h4>Persentase Minuman</h4>
-                  <p>${totalCups > 0 ? ((totalCups/totalQuantity)*100).toFixed(1) : '0'}% dari total</p>
+                  <p>${totalCups > 0 ? ((totalCups / totalQuantity) * 100).toFixed(1) : '0'}% dari total</p>
                 </div>
               </div>
             </div>
@@ -958,8 +978,8 @@ export default function ReportsPage() {
               </thead>
               <tbody>
                 ${timeSeriesData.map((day, index) => {
-                  const revenuePerOrder = day.orders > 0 ? (day.revenue / day.orders) : 0;
-                  return `
+        const revenuePerOrder = day.orders > 0 ? (day.revenue / day.orders) : 0;
+        return `
                     <tr>
                       <td>${day.date}</td>
                       <td class="text-right">Rp ${day.revenue.toLocaleString('id-ID')}</td>
@@ -968,7 +988,7 @@ export default function ReportsPage() {
                       <td class="text-right">Rp ${revenuePerOrder.toLocaleString('id-ID')}</td>
                     </tr>
                   `;
-                }).join('')}
+      }).join('')}
               </tbody>
               <tfoot>
                 <tr>
@@ -976,7 +996,7 @@ export default function ReportsPage() {
                   <td class="text-right"><strong>Rp ${timeSeriesData.reduce((sum, day) => sum + day.revenue, 0).toLocaleString('id-ID')}</strong></td>
                   <td class="text-center"><strong>${timeSeriesData.reduce((sum, day) => sum + day.orders, 0)}</strong></td>
                   <td class="text-center"><strong>${timeSeriesData.reduce((sum, day) => sum + day.quantity, 0)} pcs</strong></td>
-                  <td class="text-right"><strong>Rp ${(totalOrders > 0 ? totalRevenue/totalOrders : 0).toLocaleString('id-ID')}</strong></td>
+                  <td class="text-right"><strong>Rp ${(totalOrders > 0 ? totalRevenue / totalOrders : 0).toLocaleString('id-ID')}</strong></td>
                 </tr>
               </tfoot>
             </table>
@@ -985,11 +1005,11 @@ export default function ReportsPage() {
             <div class="footer">
               <p>Laporan ini dibuat secara otomatis oleh sistem Eatopia</p>
               <p>EATOPIA COFFEE SHOP • Document ID: SR-${startDate.replace(/-/g, '')}-${endDate.replace(/-/g, '')}</p>
-              <p>Generated: ${new Date(getIndonesiaTime()).toLocaleString('id-ID', { 
-                hour: '2-digit', 
-                minute: '2-digit', 
-                second: '2-digit' 
-              })}</p>
+              <p>Generated: ${new Date(getIndonesiaTime()).toLocaleString('id-ID', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      })}</p>
             </div>
           </div>
           
@@ -1004,9 +1024,9 @@ export default function ReportsPage() {
         </body>
       </html>
     `)
-    printWindow.document.close()
+      printWindow.document.close()
+    }
   }
-}
 
   // PERBAIKAN: Fungsi quick date ranges dengan timezone Jakarta yang benar
   const quickDateRanges = {
@@ -1134,13 +1154,7 @@ export default function ReportsPage() {
           <p className="text-amber-600 mt-1 sm:mt-2 text-sm sm:text-base">Analisis detail performa kedai kopi Anda</p>
         </div>
         <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-          <button
-            onClick={exportToXLS}
-            className="bg-green-600 text-white px-3 sm:px-4 py-2 rounded-lg flex items-center justify-center space-x-2 hover:bg-green-700 transition-colors text-sm sm:text-base"
-          >
-            <Download className="h-4 w-4" />
-            <span>Export Excel</span>
-          </button>
+        
           <button
             onClick={exportToPDF}
             className="bg-red-600 text-white px-3 sm:px-4 py-2 rounded-lg flex items-center justify-center space-x-2 hover:bg-red-700 transition-colors text-sm sm:text-base"
@@ -1493,13 +1507,13 @@ export default function ReportsPage() {
 
               <ResponsiveContainer width="100%" height={isMobile ? 320 : 380}>
                 <BarChart
-                  data={productSales}
+                  data={productSales.slice(0, 10)} // Tetap 10 data untuk chart
                   layout="vertical"
                   margin={{
                     top: 10,
                     right: 30,
                     left: isMobile ? 10 : 30,
-                    bottom: 10
+                    bottom: 1
                   }}
                 >
                   <defs>
@@ -1573,7 +1587,7 @@ export default function ReportsPage() {
                     maxBarSize={isMobile ? 28 : 35}
                     fill="url(#revenueGradient)"
                   >
-                    {productSales.map((entry, index) => (
+                    {productSales.slice(0, 10).map((entry, index) => (
                       <Cell
                         key={`cell-${index}`}
                         fill={`url(#revenueGradient)`}
@@ -1585,51 +1599,74 @@ export default function ReportsPage() {
               </ResponsiveContainer>
 
               {/* Enhanced Summary Stats */}
-              {productSales.length > 0 && (
-                <div className="mt-6 pt-4 border-t border-gray-200">
-                  <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
-                    <div className="bg-linear-to-r from-amber-50 to-orange-50 p-3 rounded-lg border border-amber-200">
-                      <p className="text-gray-600 font-medium text-xs">TOTAL REVENUE</p>
-                      <p className="text-amber-700 font-bold text-lg">
-                        Rp {productSales.reduce((sum, product) => sum + product.total_revenue, 0).toLocaleString('id-ID')}
-                      </p>
-                    </div>
 
-                    <div className="bg-linear-to-r from-green-50 to-emerald-50 p-3 rounded-lg border border-green-200">
-                      <p className="text-gray-600 font-medium text-xs">TOTAL QUANTITY</p>
-                      <p className="text-green-700 font-bold text-lg">
-                        {productSales.reduce((sum, product) => sum + product.quantity_sold, 0).toLocaleString('id-ID')} pcs
-                      </p>
-                    </div>
-
-
-                    <div className="bg-linear-to-r from-purple-50 to-violet-50 p-3 rounded-lg border border-purple-200">
-                      <p className="text-gray-600 font-medium text-xs">TOP PRODUCT</p>
-                      <p className="text-purple-700 font-bold text-sm truncate" title={productSales[0]?.product_name}>
-                        {productSales[0]?.product_name}
-                      </p>
-                      <p className="text-purple-600 text-xs">
-                        {productSales[0]?.quantity_sold} pcs sold
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
 
           {/* Detailed Tables */}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-6 lg:gap-8">
-            {/* Product Sales Table */}
+            {/* Product Sales Table dengan Pagination */}
             <div className="bg-white rounded-lg shadow">
-              <div className="p-4 sm:p-6 border-b">
-                <h3 className="text-base sm:text-lg font-semibold">Product Sales Details</h3>
+              <div className="p-4 sm:p-6 border-b flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div>
+                  <h3 className="text-base sm:text-lg font-semibold">Product Sales Details</h3>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Showing {indexOfFirstItem + 1}-{Math.min(indexOfLastItem, productSales.length)} of {productSales.length} products
+                  </p>
+                </div>
+
+                {/* Pagination Controls */}
+                {productSales.length > itemsPerPage && (
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={goToPrevPage}
+                      disabled={currentPage === 1}
+                      className={`p-2 rounded-md ${currentPage === 1
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          : 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                        }`}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+
+                    <div className="flex items-center space-x-1">
+                      {renderPaginationNumbers().map((pageNum, index) => (
+                        <button
+                          key={index}
+                          onClick={() => typeof pageNum === 'number' ? goToPage(pageNum) : null}
+                          className={`min-w-32px h-8 px-2 rounded-md text-sm ${pageNum === currentPage
+                              ? 'bg-amber-600 text-white'
+                              : typeof pageNum === 'number'
+                                ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                : 'bg-transparent text-gray-400 cursor-default'
+                            }`}
+                          disabled={pageNum === '...'}
+                        >
+                          {pageNum}
+                        </button>
+                      ))}
+                    </div>
+
+                    <button
+                      onClick={goToNextPage}
+                      disabled={currentPage === totalPages}
+                      className={`p-2 rounded-md ${currentPage === totalPages
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          : 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                        }`}
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
               </div>
+
               <div className="p-2 sm:p-4 lg:p-6">
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[500px]">
                     <thead>
                       <tr className="border-b">
+                        <th className="text-left py-2 text-xs sm:text-sm">No</th>
                         <th className="text-left py-2 text-xs sm:text-sm">Product Name</th>
                         <th className="text-left py-2 text-xs sm:text-sm">Category</th>
                         <th className="text-left py-2 text-xs sm:text-sm">Quantity</th>
@@ -1637,32 +1674,99 @@ export default function ReportsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {productSales.map((product: ProductSales, index: number) => (
+                      {currentProductSales.map((product: ProductSales, index: number) => (
                         <tr key={index} className="border-b hover:bg-gray-50">
-                          <td className="py-2 sm:py-3 font-medium text-xs sm:text-sm truncate max-w-[120px] sm:max-w-none">
-                            {product.product_name}
+                          <td className="py-2 sm:py-3 text-xs sm:text-sm">
+                            {indexOfFirstItem + index + 1}
                           </td>
-                          <td className="py-2 sm:py-3 text-xs sm:text-sm">{product.category}</td>
-                          <td className="py-2 sm:py-3 text-xs sm:text-sm">{product.quantity_sold} pcs</td>
-                          <td className="py-2 sm:py-3 text-xs sm:text-sm">Rp {product.total_revenue.toLocaleString('id-ID')}</td>
+                          <td className="py-2 sm:py-3 font-medium text-xs sm:text-sm truncate max-w-[120px] sm:max-w-none">
+                            <div className="flex items-center">
+                              {getCategoryIcon(product.category)}
+                              <span title={product.product_name}>
+                                {product.product_name}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-2 sm:py-3 text-xs sm:text-sm">
+                            <span className={`px-2 py-1 rounded-full text-xs ${product.category === 'Snacks' || product.category === 'Food'
+                                ? 'bg-orange-100 text-orange-800'
+                                : ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic', 'Mocktail', 'Non-Coffe'].includes(product.category)
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : 'bg-gray-100 text-gray-800'
+                              }`}>
+                              {product.category}
+                            </span>
+                          </td>
+                          <td className="py-2 sm:py-3 text-xs sm:text-sm">
+                            <div className="flex items-center">
+                              <span className="font-medium">
+                                {formatQuantity(product.quantity_sold, product.category)}
+                              </span>
+                              {product.category === 'Snacks' || product.category === 'Food' ? (
+                                <Package className="h-3 w-3 ml-1 text-orange-500" />
+                              ) : ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic', 'Mocktail', 'Non-Coffe'].includes(product.category) ? (
+                                <Coffee className="h-3 w-3 ml-1 text-blue-500" />
+                              ) : null}
+                            </div>
+                          </td>
+                          <td className="py-2 sm:py-3 text-xs sm:text-sm font-medium text-green-700">
+                            Rp {product.total_revenue.toLocaleString('id-ID')}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
-                    {categorySales.length > 0 && (
+                    {productSales.length > 0 && (
                       <tfoot>
                         <tr className="bg-gray-50 font-semibold">
-                          <td colSpan={2} className="py-2 sm:py-3 text-xs sm:text-sm">TOTAL</td>
+                          <td colSpan={3} className="py-2 sm:py-3 text-xs sm:text-sm">TOTAL (Page {currentPage})</td>
                           <td className="py-2 sm:py-3 text-xs sm:text-sm">
-                            {categorySales.reduce((sum, cat) => sum + cat.quantity_sold, 0)} pcs
+                            {currentProductSales.reduce((sum, product) => sum + product.quantity_sold, 0)} items
                           </td>
-                          <td className="py-2 sm:py-3 text-xs sm:text-sm">
-                            Rp {categorySales.reduce((sum, cat) => sum + cat.total_revenue, 0).toLocaleString('id-ID')}
+                          <td className="py-2 sm:py-3 text-xs sm:text-sm text-green-700">
+                            Rp {currentProductSales.reduce((sum, product) => sum + product.total_revenue, 0).toLocaleString('id-ID')}
                           </td>
                         </tr>
+                        {productSales.length > itemsPerPage && (
+                          <tr className="bg-amber-50 text-amber-800">
+                            <td colSpan={5} className="py-2 sm:py-3 text-xs sm:text-sm text-center">
+                              Total all products: {productSales.reduce((sum, product) => sum + product.quantity_sold, 0)} items •
+                              Rp {productSales.reduce((sum, product) => sum + product.total_revenue, 0).toLocaleString('id-ID')}
+                            </td>
+                          </tr>
+                        )}
                       </tfoot>
                     )}
                   </table>
                 </div>
+
+                {/* Pagination Footer untuk mobile */}
+                {isMobile && productSales.length > itemsPerPage && (
+                  <div className="mt-4 flex justify-between items-center">
+                    <button
+                      onClick={goToPrevPage}
+                      disabled={currentPage === 1}
+                      className={`px-3 py-1 rounded text-sm ${currentPage === 1
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          : 'bg-amber-100 text-amber-800'
+                        }`}
+                    >
+                      Previous
+                    </button>
+                    <span className="text-sm text-gray-600">
+                      Page {currentPage} of {totalPages}
+                    </span>
+                    <button
+                      onClick={goToNextPage}
+                      disabled={currentPage === totalPages}
+                      className={`px-3 py-1 rounded text-sm ${currentPage === totalPages
+                          ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                          : 'bg-amber-100 text-amber-800'
+                        }`}
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1698,23 +1802,30 @@ export default function ReportsPage() {
                           <tr key={index} className="border-b hover:bg-gray-50">
                             <td className="py-2 sm:py-3 text-xs sm:text-sm">
                               <div className="flex items-center">
-                                {isSnack ? (
-                                  <Package className="h-3 w-3 mr-2 text-orange-500" />
-                                ) : isDrink ? (
-                                  <Coffee className="h-3 w-3 mr-2 text-blue-500" />
-                                ) : null}
+                                {getCategoryIcon(category.category)}
                                 {category.category}
                               </div>
                             </td>
                             <td className="py-2 sm:py-3 text-xs sm:text-sm">
                               <span className={`px-2 py-1 rounded-full text-xs ${type === 'Drink' ? 'bg-blue-100 text-blue-800' :
-                                  type === 'Snack' ? 'bg-orange-100 text-orange-800' :
-                                    'bg-gray-100 text-gray-800'
+                                type === 'Snack' ? 'bg-orange-100 text-orange-800' :
+                                  'bg-gray-100 text-gray-800'
                                 }`}>
                                 {type}
                               </span>
                             </td>
-                            <td className="py-2 sm:py-3 text-xs sm:text-sm">{category.quantity_sold} pcs</td>
+                            <td className="py-2 sm:py-3 text-xs sm:text-sm">
+                              <div className="flex items-center">
+                                <span className="font-medium">
+                                  {formatQuantity(category.quantity_sold, category.category)}
+                                </span>
+                                {isSnack ? (
+                                  <Package className="h-3 w-3 ml-1 text-orange-500" />
+                                ) : isDrink ? (
+                                  <Coffee className="h-3 w-3 ml-1 text-blue-500" />
+                                ) : null}
+                              </div>
+                            </td>
                             <td className="py-2 sm:py-3 text-xs sm:text-sm">Rp {category.total_revenue.toLocaleString('id-ID')}</td>
                             <td className="py-2 sm:py-3 text-xs sm:text-sm">{category.percentage.toFixed(1)}%</td>
                           </tr>
@@ -1727,7 +1838,7 @@ export default function ReportsPage() {
                         <tr className="bg-gray-50 font-semibold">
                           <td colSpan={2} className="py-2 sm:py-3 text-xs sm:text-sm">TOTAL</td>
                           <td className="py-2 sm:py-3 text-xs sm:text-sm">
-                            {categorySales.reduce((sum, cat) => sum + cat.quantity_sold, 0)} pcs
+                            {categorySales.reduce((sum, cat) => sum + cat.quantity_sold, 0)} items
                           </td>
                           <td className="py-2 sm:py-3 text-xs sm:text-sm">
                             Rp {categorySales.reduce((sum, cat) => sum + cat.total_revenue, 0).toLocaleString('id-ID')}
