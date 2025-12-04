@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Order, Product, OrderItem } from '@/types'
 import {
@@ -27,7 +27,10 @@ import {
   Settings,
   AlertCircle,
   Download,
-  Upload
+  Upload,
+  ChevronLeft,
+  ChevronRight,
+  Calendar
 } from 'lucide-react'
 
 // Tipe data untuk form order baru
@@ -80,15 +83,15 @@ interface AlertModalProps {
 }
 
 // Component untuk Alert Modal
-const AlertModal = ({ 
-  isOpen, 
-  title, 
-  message, 
-  type, 
-  onClose, 
-  onConfirm, 
-  confirmText = 'OK', 
-  cancelText = 'Batal' 
+const AlertModal = ({
+  isOpen,
+  title,
+  message,
+  type,
+  onClose,
+  onConfirm,
+  confirmText = 'OK',
+  cancelText = 'Batal'
 }: AlertModalProps) => {
   if (!isOpen) return null
 
@@ -124,7 +127,7 @@ const AlertModal = ({
         <div className="p-6 border-b border-gray-200">
           <h3 className="text-xl font-semibold text-gray-900">{title}</h3>
         </div>
-        
+
         <div className="p-6">
           <div className="text-center mb-6">
             <div className="flex justify-center mb-4">
@@ -132,7 +135,7 @@ const AlertModal = ({
             </div>
             <div className="text-gray-700 whitespace-pre-line">{message}</div>
           </div>
-          
+
           <div className={`flex ${onConfirm ? 'grid grid-cols-2 gap-3' : 'justify-center'}`}>
             {onConfirm && (
               <button
@@ -174,6 +177,12 @@ export default function OrdersPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [isMobile, setIsMobile] = useState(false)
   const [selectedDate, setSelectedDate] = useState<string>('')
+
+  // State pagination
+  const [currentPage, setCurrentPage] = useState(1)
+  const [itemsPerPage, setItemsPerPage] = useState(10)
+  const [totalOrders, setTotalOrders] = useState(0)
+  const [filteredOrders, setFilteredOrders] = useState<Order[]>([])
 
   // State modal
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -238,10 +247,14 @@ export default function OrdersPage() {
     items: []
   })
 
+  // Ref untuk tracking previous selectedDate
+  const prevSelectedDateRef = useRef<string>('')
+  const isInitialMount = useRef(true)
+
   // Fungsi untuk menampilkan alert modal
   const showAlert = (
-    title: string, 
-    message: string, 
+    title: string,
+    message: string,
     type: 'success' | 'error' | 'warning' | 'info' = 'info',
     onConfirm?: () => void,
     confirmText?: string,
@@ -283,10 +296,173 @@ export default function OrdersPage() {
     localStorage.setItem('printerConfig', JSON.stringify(printerConfig))
   }, [printerConfig])
 
-  // Inisialisasi
+  // ============================
+  // PAGINATION FUNCTIONS
+  // ============================
+
+  // Fetch total count orders
+  const fetchTotalOrders = async () => {
+    try {
+      let query = supabase
+        .from('orders')
+        .select('id', { count: 'exact', head: true })
+
+      // Filter by date jika dipilih
+      if (selectedDate) {
+        const startDate = new Date(selectedDate)
+        startDate.setHours(0, 0, 0, 0)
+        const endDate = new Date(selectedDate)
+        endDate.setHours(23, 59, 59, 999)
+
+        query = query
+          .gte('created_at', startDate.toISOString())
+          .lte('created_at', endDate.toISOString())
+      }
+
+      // Filter by status
+      if (statusFilter !== 'all') {
+        query = query.eq('status', statusFilter)
+      }
+
+      const { count, error } = await query
+
+      if (error) throw error
+      setTotalOrders(count || 0)
+    } catch (error) {
+      console.error('Error fetching total orders:', error)
+    }
+  }
+
+  // Fetch orders dengan pagination
+  const fetchOrders = async () => {
+    try {
+      setLoading(true)
+
+      // Hitung offset untuk pagination
+      const from = (currentPage - 1) * itemsPerPage
+      const to = from + itemsPerPage - 1
+
+      let query = supabase
+        .from('orders')
+        .select(`
+        *,
+        order_items(
+          *,
+          products(*)
+        )
+      `, { count: 'exact' })
+        .order('created_at', { ascending: false })
+        .range(from, to)
+
+      // Filter by date jika dipilih
+      if (selectedDate) {
+        const startDate = new Date(selectedDate)
+        startDate.setHours(0, 0, 0, 0)
+        const endDate = new Date(selectedDate)
+        endDate.setHours(23, 59, 59, 999)
+
+        query = query
+          .gte('created_at', startDate.toISOString())
+          .lte('created_at', endDate.toISOString())
+      } else {
+        // Default: tampilkan hari ini
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+        const tomorrow = new Date(today)
+        tomorrow.setDate(tomorrow.getDate() + 1)
+
+        query = query
+          .gte('created_at', today.toISOString())
+          .lt('created_at', tomorrow.toISOString())
+      }
+
+      // Filter by status
+      if (statusFilter !== 'all') {
+        query = query.eq('status', statusFilter)
+      }
+
+      const { data: ordersData, error: ordersError, count } = await query
+
+      if (ordersError) {
+        console.error('Error query utama:', ordersError)
+        throw ordersError
+      }
+
+      setOrders(ordersData || [])
+      setTotalOrders(count || 0)
+
+      // Apply search filter jika ada
+      applySearchFilter(ordersData || [])
+    } catch (error: any) {
+      console.error('❌ Error fetching orders:', error)
+      showAlert(
+        'Gagal Memuat Data',
+        'Gagal memuat data order: ' + error.message,
+        'error'
+      )
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Apply search filter ke data yang sudah di-fetch
+  const applySearchFilter = (data: Order[]) => {
+    if (!searchTerm.trim()) {
+      setFilteredOrders(data)
+      return
+    }
+
+    const filtered = data.filter(order => {
+      const searchLower = searchTerm.toLowerCase()
+      return (
+        order.order_number.toLowerCase().includes(searchLower) ||
+        order.customer_name?.toLowerCase().includes(searchLower) ||
+        order.customer_phone?.includes(searchTerm)
+      )
+    })
+
+    setFilteredOrders(filtered)
+  }
+
+  // Reset ke hari ini
+  const resetToToday = () => {
+    const today = new Date()
+    const todayFormatted = today.toISOString().split('T')[0]
+
+    setSelectedDate(todayFormatted)
+    setCurrentPage(1)
+  }
+
+  // Fetch products
+  const fetchProducts = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .eq('is_available', true)
+        .order('name')
+
+      if (error) throw error
+      setProducts(data || [])
+    } catch (error: any) {
+      console.error('Error fetching products:', error)
+      showAlert(
+        'Gagal Memuat Produk',
+        'Gagal memuat data produk: ' + error.message,
+        'error'
+      )
+    }
+  }
+
+  // Use effect untuk fetch data saat filter berubah
   useEffect(() => {
-    fetchOrders()
-    fetchProducts()
+    const fetchInitialData = async () => {
+      await fetchOrders()
+      await fetchTotalOrders()
+      await fetchProducts()
+    }
+    
+    fetchInitialData()
     checkMobile()
 
     const handleResize = () => checkMobile()
@@ -294,8 +470,104 @@ export default function OrdersPage() {
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
+  // Effect untuk handle perubahan selectedDate
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false
+      return
+    }
+
+    // Cek jika selectedDate benar-benar berubah
+    if (selectedDate !== prevSelectedDateRef.current) {
+      console.log('Selected date changed from', prevSelectedDateRef.current, 'to', selectedDate)
+      prevSelectedDateRef.current = selectedDate
+      
+      // Reset ke halaman 1 dan fetch data
+      setCurrentPage(1)
+      fetchOrders()
+      fetchTotalOrders()
+    }
+  }, [selectedDate])
+
+  // Effect untuk handle perubahan statusFilter
+  useEffect(() => {
+    if (isInitialMount.current) return
+
+    console.log('Status filter changed to:', statusFilter)
+    setCurrentPage(1)
+    fetchOrders()
+    fetchTotalOrders()
+  }, [statusFilter])
+
+  // Effect untuk handle perubahan pagination
+  useEffect(() => {
+    if (isInitialMount.current) return
+
+    console.log('Pagination changed:', { currentPage, itemsPerPage })
+    fetchOrders()
+    fetchTotalOrders()
+  }, [currentPage, itemsPerPage])
+
+  // Update useEffect untuk search
+  useEffect(() => {
+    if (searchTerm.trim()) {
+      // Apply filter ke data yang sudah ada
+      applySearchFilter(orders)
+    } else {
+      setFilteredOrders(orders)
+    }
+  }, [searchTerm, orders])
+
   const checkMobile = () => {
     setIsMobile(window.innerWidth < 768)
+  }
+
+  // Pagination controls
+  const totalPages = Math.ceil(totalOrders / itemsPerPage)
+  const hasPreviousPage = currentPage > 1
+  const hasNextPage = currentPage < totalPages
+
+  const goToPage = (page: number) => {
+    if (page >= 1 && page <= totalPages) {
+      setCurrentPage(page)
+    }
+  }
+
+  const goToPreviousPage = () => {
+    if (hasPreviousPage) {
+      setCurrentPage(prev => prev - 1)
+    }
+  }
+
+  const goToNextPage = () => {
+    if (hasNextPage) {
+      setCurrentPage(prev => prev + 1)
+    }
+  }
+
+  // Handle search
+  const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchTerm(e.target.value)
+  }
+
+  // Handle date change dengan immediate refresh
+  const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newDate = e.target.value
+    console.log('Date changed to:', newDate)
+    setSelectedDate(newDate)
+    // Tidak perlu panggil fetchOrders di sini, useEffect akan handle
+  }
+
+  // Handle status filter change
+  const handleStatusFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setStatusFilter(e.target.value)
+    // Tidak perlu panggil fetchOrders di sini, useEffect akan handle
+  }
+
+  // Clear date filter
+  const clearDateFilter = () => {
+    setSelectedDate('')
+    setCurrentPage(1)
   }
 
   // ============================
@@ -549,16 +821,15 @@ export default function OrdersPage() {
       lines.push(LF)
       lines.push('Telp: ' + printerConfig.storePhone)
       lines.push(LF)
-      lines.push('Kasir' + printerConfig.storeKasir)
     }
-
+    
     // Separator
     lines.push('='.repeat(printerConfig.paperWidth === 80 ? 40 : 32))
     lines.push(LF)
-
+    
     // Left align untuk konten
     lines.push(ESC + 'a' + '\x00')
-
+    
     // Order info (singkat)
     lines.push('No: ' + order.order_number)
     lines.push(LF)
@@ -569,7 +840,7 @@ export default function OrdersPage() {
       minute: '2-digit'
     }))
     lines.push(LF)
-
+    
     if (order.completed_at) {
       lines.push('Sls: ' + new Date(order.completed_at).toLocaleTimeString('id-ID', {
         hour: '2-digit',
@@ -577,7 +848,8 @@ export default function OrdersPage() {
       }))
       lines.push(LF)
     }
-
+    
+    
     lines.push('Kasir: Ilham')
     lines.push(LF)
     lines.push('Status: ' + order.status.toUpperCase())
@@ -1019,10 +1291,6 @@ export default function OrdersPage() {
           <div><strong>No: ${order.order_number}</strong></div>
           <div>Tanggal: ${new Date(order.created_at).toLocaleDateString('id-ID')}</div>
           <div>Waktu: ${new Date(order.created_at).toLocaleTimeString('id-ID')}</div>
-          ${order.completed_at ?
-        `<div>Selesai: ${new Date(order.completed_at).toLocaleTimeString('id-ID')}</div>` :
-        ''
-      }
           <div>Kasir: ${printerConfig.storeKasir}</div>
           <div>Status: <strong>${order.status.toUpperCase()}</strong></div>
           ${order.customer_name ? `<div>Pelanggan: ${order.customer_name}</div>` : ''}
@@ -1097,75 +1365,7 @@ export default function OrdersPage() {
   // FUNGSI DATABASE & ORDER
   // ============================
 
-  // Fetch data dari Supabase
-  const fetchOrders = async () => {
-    try {
-      setLoading(true)
-
-      let query = supabase
-        .from('orders')
-        .select(`
-          *,
-          order_items(
-            *,
-            products(*)
-          )
-        `)
-        .order('created_at', { ascending: false })
-
-      // Filter by date jika dipilih
-      if (selectedDate) {
-        const startDate = new Date(selectedDate)
-        startDate.setHours(0, 0, 0, 0)
-        const endDate = new Date(selectedDate)
-        endDate.setHours(23, 59, 59, 999)
-
-        query = query
-          .gte('created_at', startDate.toISOString())
-          .lte('created_at', endDate.toISOString())
-      }
-
-      const { data: ordersData, error: ordersError } = await query
-
-      if (ordersError) {
-        console.error('Error query utama:', ordersError)
-        throw ordersError
-      }
-
-      setOrders(ordersData || [])
-    } catch (error: any) {
-      console.error('❌ Error fetching orders:', error)
-      showAlert(
-        'Gagal Memuat Data',
-        'Gagal memuat data order: ' + error.message,
-        'error'
-      )
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const fetchProducts = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('products')
-        .select('*')
-        .eq('is_available', true)
-        .order('name')
-
-      if (error) throw error
-      setProducts(data || [])
-    } catch (error: any) {
-      console.error('Error fetching products:', error)
-      showAlert(
-        'Gagal Memuat Produk',
-        'Gagal memuat data produk: ' + error.message,
-        'error'
-      )
-    }
-  }
-
-  // Update order status dengan konfirmasi cetak
+  // Update order status
   const updateOrderStatus = async (orderId: string, status: Order['status']) => {
     try {
       // Jika mengubah ke completed, tampilkan konfirmasi cetak
@@ -1177,18 +1377,17 @@ export default function OrdersPage() {
         }
       }
 
-      // Update status di database
+      // HANYA update status
       const { error } = await supabase
         .from('orders')
-        .update({
-          status,
-          completed_at: status === 'completed' ? new Date().toISOString() : null
-        })
+        .update({ status })
         .eq('id', orderId)
 
       if (error) throw error
 
+      // Refresh data dengan pagination yang sama
       await fetchOrders()
+      await fetchTotalOrders()
       setShowMobileMenu(null)
 
       if (status !== 'completed') {
@@ -1252,9 +1451,11 @@ export default function OrdersPage() {
 
           if (error) throw error
 
+          // Refresh data dengan pagination yang sama
           await fetchOrders()
+          await fetchTotalOrders()
           setShowMobileMenu(null)
-          
+
           showAlert(
             'Order Dihapus',
             'Order berhasil dihapus',
@@ -1363,6 +1564,7 @@ export default function OrdersPage() {
       resetForm()
       setShowCreateModal(false)
       await fetchOrders()
+      await fetchTotalOrders()
 
       // Tampilkan konfirmasi
       showAlert(
@@ -1506,18 +1708,6 @@ export default function OrdersPage() {
   // HELPER FUNCTIONS
   // ============================
 
-  // Filter orders
-  const filteredOrders = orders.filter(order => {
-    const matchesSearch =
-      order.order_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.customer_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.customer_phone?.includes(searchTerm)
-
-    const matchesStatus = statusFilter === 'all' || order.status === statusFilter
-
-    return matchesSearch && matchesStatus
-  })
-
   // Helper functions untuk UI
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -1593,6 +1783,65 @@ export default function OrdersPage() {
       newExpanded.add(orderId)
     }
     setExpandedRows(newExpanded)
+  }
+
+  // Empty state handler
+  const showEmptyState = () => {
+    const today = new Date().toDateString()
+    const isToday = !selectedDate || new Date(selectedDate).toDateString() === today
+
+    if (isToday && orders.length === 0) {
+      return (
+        <div className="text-center py-12">
+          <ShoppingCart className="h-24 w-24 text-gray-200 mx-auto mb-6" />
+          <h3 className="text-xl font-semibold text-gray-700 mb-2">Belum Ada Order Hari Ini</h3>
+          <p className="text-gray-500 max-w-md mx-auto mb-6">
+            Tidak ada order yang dibuat hari ini. Mulai dengan membuat order baru untuk pelanggan Anda.
+          </p>
+          <button
+            onClick={openCreateModal}
+            className="bg-amber-600 text-white px-6 py-3 rounded-lg hover:bg-amber-700 transition-colors flex items-center space-x-2 mx-auto"
+          >
+            <Plus className="h-5 w-5" />
+            <span>Buat Order Pertama</span>
+          </button>
+        </div>
+      )
+    }
+
+    if (filteredOrders.length === 0 && searchTerm) {
+      return (
+        <div className="text-center py-12">
+          <Search className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+          <p className="text-gray-500">Tidak ada order yang ditemukan untuk "{searchTerm}"</p>
+          <button
+            onClick={() => setSearchTerm('')}
+            className="mt-4 text-amber-600 hover:text-amber-700 font-medium transition-colors"
+          >
+            Clear Search
+          </button>
+        </div>
+      )
+    }
+
+    if (filteredOrders.length === 0) {
+      return (
+        <div className="text-center py-12">
+          <ShoppingCart className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+          <p className="text-gray-500">Tidak ada order yang ditemukan</p>
+          {selectedDate && (
+            <button
+              onClick={resetToToday}
+              className="mt-4 text-amber-600 hover:text-amber-700 font-medium transition-colors"
+            >
+              Lihat Order Hari Ini
+            </button>
+          )}
+        </div>
+      )
+    }
+
+    return null
   }
 
   // Loading state
@@ -1694,7 +1943,7 @@ export default function OrdersPage() {
             <div>
               <p className="text-sm text-gray-600">Order Hari ini</p>
               <p className="text-xl md:text-2xl font-bold text-gray-900">{todayOrders.length}</p>
-              <p className="text-xs text-gray-500 mt-1">{orders.length} total order</p>
+              <p className="text-xs text-gray-500 mt-1">{totalOrders} total order</p>
             </div>
             <ShoppingCart className="h-7 w-7 md:h-8 md:w-8 text-amber-600" />
           </div>
@@ -1749,26 +1998,26 @@ export default function OrdersPage() {
                 type="text"
                 placeholder="Cari order number, nama pelanggan..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={handleSearch}
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
             </div>
           </div>
 
           <div className="flex flex-col sm:flex-row gap-3">
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => {
-                setSelectedDate(e.target.value)
-                setTimeout(() => fetchOrders(), 100)
-              }}
-              className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
-            />
+            <div className="relative flex-1">
+              <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={handleDateChange}
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
 
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={handleStatusFilterChange}
               className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
             >
               <option value="all">Semua Status</option>
@@ -1778,15 +2027,20 @@ export default function OrdersPage() {
               <option value="cancelled">Cancelled</option>
             </select>
 
-            {selectedDate && (
+            <button
+              onClick={resetToToday}
+              className="px-4 py-2 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 transition-colors flex items-center space-x-2"
+            >
+              <Calendar className="h-4 w-4" />
+              <span>Hari Ini</span>
+            </button>
+
+            {selectedDate && selectedDate !== new Date().toISOString().split('T')[0] && (
               <button
-                onClick={() => {
-                  setSelectedDate('')
-                  fetchOrders()
-                }}
+                onClick={clearDateFilter}
                 className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
               >
-                Clear Date
+                Clear Filter
               </button>
             )}
           </div>
@@ -1798,18 +2052,7 @@ export default function OrdersPage() {
         {isMobile ? (
           /* Mobile View */
           <div className="divide-y divide-amber-50">
-            {filteredOrders.length === 0 ? (
-              <div className="text-center py-12">
-                <ShoppingCart className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-                <p className="text-gray-500">Tidak ada order yang ditemukan</p>
-                <button
-                  onClick={openCreateModal}
-                  className="mt-4 text-amber-600 hover:text-amber-700 font-medium transition-colors"
-                >
-                  Buat order pertama
-                </button>
-              </div>
-            ) : (
+            {showEmptyState() || (
               filteredOrders.map((order) => (
                 <div key={order.id} className="border-b border-amber-50">
                   <div className="p-4 hover:bg-amber-50 transition-colors">
@@ -1927,10 +2170,10 @@ export default function OrdersPage() {
                                 <p className="font-medium text-gray-900 text-sm">
                                   {item.products?.name || 'Nama produk tidak tersedia'}
                                 </p>
-                                                           </div>
+                              </div>
                               <div className="text-right">
                                 <p className="font-semibold text-gray-900 text-sm">
-                                 x {item.quantity}
+                                  x {item.quantity}
                                 </p>
                               </div>
                             </div>
@@ -1965,17 +2208,10 @@ export default function OrdersPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredOrders.length === 0 ? (
+                {showEmptyState() ? (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center">
-                      <ShoppingCart className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-                      <p className="text-gray-500">Tidak ada order yang ditemukan</p>
-                      <button
-                        onClick={openCreateModal}
-                        className="mt-4 text-amber-600 hover:text-amber-700 font-medium transition-colors"
-                      >
-                        Buat order pertama
-                      </button>
+                    <td colSpan={8}>
+                      {showEmptyState()}
                     </td>
                   </tr>
                 ) : (
@@ -2112,6 +2348,136 @@ export default function OrdersPage() {
                 )}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Pagination Controls */}
+        {filteredOrders.length > 0 && (
+          <div className="bg-white border-t border-amber-100 px-6 py-4 rounded-b-xl">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-center space-x-4">
+                <div className="text-sm text-gray-600">
+                  Menampilkan <span className="font-medium">{(currentPage - 1) * itemsPerPage + 1}</span>-
+                  <span className="font-medium">
+                    {Math.min(currentPage * itemsPerPage, totalOrders)}
+                  </span> dari <span className="font-medium">{totalOrders}</span> order
+                </div>
+
+                <select
+                  value={itemsPerPage}
+                  onChange={(e) => {
+                    setItemsPerPage(Number(e.target.value))
+                    setCurrentPage(1)
+                  }}
+                  className="text-sm border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-amber-500"
+                >
+                  <option value="5">5 per halaman</option>
+                  <option value="10">10 per halaman</option>
+                  <option value="20">20 per halaman</option>
+                  <option value="50">50 per halaman</option>
+                </select>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={goToPreviousPage}
+                  disabled={!hasPreviousPage}
+                  className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+
+                <div className="flex items-center space-x-1">
+                  {/* First page */}
+                  {currentPage > 3 && (
+                    <>
+                      <button
+                        onClick={() => goToPage(1)}
+                        className="w-8 h-8 flex items-center justify-center text-sm font-medium text-gray-700 hover:bg-amber-100 hover:text-amber-700 rounded-lg transition-colors"
+                      >
+                        1
+                      </button>
+                      {currentPage > 4 && (
+                        <span className="text-gray-400">...</span>
+                      )}
+                    </>
+                  )}
+
+                  {/* Page numbers */}
+                  {[...Array(totalPages)].map((_, index) => {
+                    const pageNumber = index + 1
+                    if (
+                      pageNumber === currentPage ||
+                      pageNumber === currentPage - 1 ||
+                      pageNumber === currentPage + 1 ||
+                      pageNumber === currentPage - 2 ||
+                      pageNumber === currentPage + 2
+                    ) {
+                      return (
+                        <button
+                          key={pageNumber}
+                          onClick={() => goToPage(pageNumber)}
+                          className={`w-8 h-8 flex items-center justify-center text-sm font-medium rounded-lg transition-colors ${currentPage === pageNumber
+                            ? 'bg-amber-600 text-white'
+                            : 'text-gray-700 hover:bg-amber-100 hover:text-amber-700'
+                            }`}
+                        >
+                          {pageNumber}
+                        </button>
+                      )
+                    }
+                    return null
+                  })}
+
+                  {/* Last page */}
+                  {currentPage < totalPages - 2 && (
+                    <>
+                      {currentPage < totalPages - 3 && (
+                        <span className="text-gray-400">...</span>
+                      )}
+                      <button
+                        onClick={() => goToPage(totalPages)}
+                        className="w-8 h-8 flex items-center justify-center text-sm font-medium text-gray-700 hover:bg-amber-100 hover:text-amber-700 rounded-lg transition-colors"
+                      >
+                        {totalPages}
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                <button
+                  onClick={goToNextPage}
+                  disabled={!hasNextPage}
+                  className="p-2 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  aria-label="Next page"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Order Summary */}
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              <div className="flex flex-wrap gap-4 text-sm text-gray-600">
+                <div className="flex items-center">
+                  <div className="w-3 h-3 bg-yellow-500 rounded-full mr-2"></div>
+                  <span>Pending: {orders.filter(o => o.status === 'pending').length}</span>
+                </div>
+                <div className="flex items-center">
+                  <div className="w-3 h-3 bg-blue-500 rounded-full mr-2"></div>
+                  <span>Processing: {orders.filter(o => o.status === 'processing').length}</span>
+                </div>
+                <div className="flex items-center">
+                  <div className="w-3 h-3 bg-green-500 rounded-full mr-2"></div>
+                  <span>Completed: {orders.filter(o => o.status === 'completed').length}</span>
+                </div>
+                <div className="flex items-center">
+                  <div className="w-3 h-3 bg-red-500 rounded-full mr-2"></div>
+                  <span>Cancelled: {orders.filter(o => o.status === 'cancelled').length}</span>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -2449,9 +2815,6 @@ export default function OrdersPage() {
                 </div>
                 <div className="mt-2 text-xs text-amber-700">
                   Dibuat pada {new Date(selectedOrder.created_at).toLocaleString('id-ID')}
-                  {selectedOrder.completed_at && (
-                    <span> • Selesai pada {new Date(selectedOrder.completed_at).toLocaleString('id-ID')}</span>
-                  )}
                 </div>
               </div>
             </div>
