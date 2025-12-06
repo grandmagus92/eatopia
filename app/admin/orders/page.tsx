@@ -1966,7 +1966,7 @@ export default function OrdersPage() {
             <div>
               <p className="text-sm text-gray-600">Pendapatan Hari ini.</p>
               <p className="text-xl md:text-2xl font-bold text-green-600">
-                {formatCurrency(todayRevenue)}
+               {stats.todayRevenue.toLocaleString('id-ID')}
               </p>
               <p className="text-xs text-gray-500 mt-1">{formatCurrency(totalRevenue)} total</p>
             </div>
