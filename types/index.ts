@@ -10,19 +10,6 @@ export interface Product {
   updated_at: string
 }
 
-export interface Order {
-  id: string
-  order_number: string
-  total_amount: number
-  status: 'pending' | 'processing' | 'completed' | 'cancelled'
-  payment_method: string // Ubah menjadi string saja
-  customer_name?: string
-  customer_phone?: string
-  notes?: string
-  created_at: string
-  items?: OrderItem[]
-}
-
 export interface OrderItem {
   id: string
   order_id: string
@@ -89,6 +76,7 @@ export interface Order {
   updated_at: string
   completed_at: string | null // Tambahkan ini
   order_items: OrderItem[]
+  order_type?: string;
 }
 
 export interface ReportData {
