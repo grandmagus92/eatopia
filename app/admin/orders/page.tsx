@@ -30,7 +30,14 @@ import {
   Upload,
   ChevronLeft,
   ChevronRight,
-  Calendar
+  Calendar,
+  Save,
+  RefreshCw,
+  DollarSign,
+  TrendingUp,
+  Home,
+  UtensilsCrossed,
+  Coffee
 } from 'lucide-react'
 
 // Tipe data untuk form order baru
@@ -39,6 +46,7 @@ interface OrderFormData {
   customer_phone: string
   payment_method: string
   notes: string
+  order_type: 'openbill' | 'closebill'
   items: Array<{
     product_id: string
     quantity: number
@@ -168,6 +176,12 @@ const PAYMENT_METHODS = [
   { value: 'gopay', label: 'GoPay' }
 ] as const
 
+// Jenis order
+const ORDER_TYPES = [
+  { value: 'openbill', label: 'Open Bill' },
+  { value: 'closebill', label: 'Close Bill' }
+] as const
+
 export default function OrdersPage() {
   // State utama
   const [orders, setOrders] = useState<Order[]>([])
@@ -175,8 +189,19 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [orderTypeFilter, setOrderTypeFilter] = useState<string>('all')
   const [isMobile, setIsMobile] = useState(false)
   const [selectedDate, setSelectedDate] = useState<string>('')
+
+  // State untuk statistik dari database
+  const [pendingCount, setPendingCount] = useState(0)
+  const [todayRevenue, setTodayRevenue] = useState(0)
+  const [todayOrdersCount, setTodayOrdersCount] = useState(0)
+  const [totalRevenue, setTotalRevenue] = useState(0)
+  const [completedCount, setCompletedCount] = useState(0)
+  const [processingCount, setProcessingCount] = useState(0)
+  const [cancelledCount, setCancelledCount] = useState(0)
+  const [statsLoading, setStatsLoading] = useState(true)
 
   // State pagination
   const [currentPage, setCurrentPage] = useState(1)
@@ -189,6 +214,33 @@ export default function OrdersPage() {
   const [showDetailModal, setShowDetailModal] = useState(false)
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [submitLoading, setSubmitLoading] = useState(false)
+
+  // State untuk update order di modal detail
+  const [isUpdating, setIsUpdating] = useState(false)
+  const [updateForm, setUpdateForm] = useState<{
+    customer_name: string
+    customer_phone: string
+    payment_method: string
+    notes: string
+    status: Order['status']
+    order_type: 'openbill' | 'closebill'
+    items: Array<{
+      id?: string
+      product_id: string
+      quantity: number
+      price: number
+      product_name?: string
+      subtotal: number
+    }>
+  }>({
+    customer_name: '',
+    customer_phone: '',
+    payment_method: 'cash',
+    notes: '',
+    status: 'pending',
+    order_type: 'openbill',
+    items: []
+  })
 
   // State untuk printer Bluetooth
   const [bluetoothPrinter, setBluetoothPrinter] = useState<BluetoothPrinter | null>(null)
@@ -244,12 +296,17 @@ export default function OrdersPage() {
     customer_phone: '',
     payment_method: 'cash',
     notes: '',
+    order_type: 'openbill',
     items: []
   })
 
   // Ref untuk tracking previous selectedDate
   const prevSelectedDateRef = useRef<string>('')
   const isInitialMount = useRef(true)
+
+  // ============================
+  // FUNGSI UTILITAS
+  // ============================
 
   // Fungsi untuk menampilkan alert modal
   const showAlert = (
@@ -276,29 +333,300 @@ export default function OrdersPage() {
     setAlertModal(prev => ({ ...prev, isOpen: false }))
   }
 
-  // Load konfigurasi dari localStorage saat pertama kali render
-  useEffect(() => {
-    const savedConfig = localStorage.getItem('printerConfig')
-    if (savedConfig) {
-      try {
-        setPrinterConfig(JSON.parse(savedConfig))
-      } catch (e) {
-        console.error('Error loading printer config:', e)
-      }
+  // Format currency
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+      minimumFractionDigits: 0
+    }).format(amount)
+  }
+
+  // Helper functions untuk UI
+  const getStatusColor = (status: Order['status']) => {
+    switch (status) {
+      case 'pending': return 'bg-yellow-100 text-yellow-800 border-yellow-200'
+      case 'processing': return 'bg-blue-100 text-blue-800 border-blue-200'
+      case 'completed': return 'bg-green-100 text-green-800 border-green-200'
+      case 'cancelled': return 'bg-red-100 text-red-800 border-red-200'
+      default: return 'bg-gray-100 text-gray-800 border-gray-200'
     }
+  }
 
-    // Cek dukungan Bluetooth
-    checkBluetoothSupport()
-  }, [])
+  const getStatusIcon = (status: Order['status']) => {
+    switch (status) {
+      case 'pending': return <Clock className="h-4 w-4" />
+      case 'processing': return <Loader2 className="h-4 w-4 animate-spin" />
+      case 'completed': return <CheckCircle className="h-4 w-4" />
+      case 'cancelled': return <XCircle className="h-4 w-4" />
+      default: return <Clock className="h-4 w-4" />
+    }
+  }
 
-  // Save konfigurasi ke localStorage saat berubah
-  useEffect(() => {
-    localStorage.setItem('printerConfig', JSON.stringify(printerConfig))
-  }, [printerConfig])
+  const getPaymentMethodIcon = (method: string) => {
+    switch (method) {
+      case 'cash': return <CreditCard className="h-4 w-4" />
+      case 'card': return <CreditCard className="h-4 w-4" />
+      case 'qris': return <CreditCard className="h-4 w-4" />
+      case 'transfer': return <CreditCard className="h-4 w-4" />
+      case 'ovo': return <CreditCard className="h-4 w-4" />
+      case 'gopay': return <CreditCard className="h-4 w-4" />
+      default: return <CreditCard className="h-4 w-4" />
+    }
+  }
+
+  const getPaymentMethodLabel = (method: string) => {
+    const paymentMethod = PAYMENT_METHODS.find(pm => pm.value === method)
+    return paymentMethod ? paymentMethod.label : method
+  }
+
+  const getOrderTypeLabel = (type: string) => {
+    const orderType = ORDER_TYPES.find(ot => ot.value === type)
+    return orderType ? orderType.label : type
+  }
+
+  const getOrderTypeIcon = (type: 'openbill' | 'closebill') => {
+    if (type === 'closebill') return '🥡'
+    return '🍽️'
+  }
+
+  const getOrderTypeColor = (type: 'openbill' | 'closebill') => {
+    return type === 'closebill'
+      ? 'bg-green-100 text-green-800 border-green-200'
+      : 'bg-blue-100 text-blue-800 border-blue-200'
+  }
 
   // ============================
-  // PAGINATION FUNCTIONS
+  // FUNGSI FETCH DATA
   // ============================
+
+  // Fetch jumlah order pending dari database
+  const fetchPendingCount = async () => {
+    try {
+      let query = supabase
+        .from('orders')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'pending')
+
+      // Filter berdasarkan tanggal jika dipilih
+      if (selectedDate) {
+        const startDate = new Date(selectedDate)
+        startDate.setHours(0, 0, 0, 0)
+        const endDate = new Date(selectedDate)
+        endDate.setHours(23, 59, 59, 999)
+
+        query = query
+          .gte('created_at', startDate.toISOString())
+          .lte('created_at', endDate.toISOString())
+      }
+
+      const { count, error } = await query
+
+      if (error) throw error
+      setPendingCount(count || 0)
+    } catch (error) {
+      console.error('Error fetching pending count:', error)
+    }
+  }
+
+  // Fetch jumlah order processing dari database
+  const fetchProcessingCount = async () => {
+    try {
+      let query = supabase
+        .from('orders')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'processing')
+
+      if (selectedDate) {
+        const startDate = new Date(selectedDate)
+        startDate.setHours(0, 0, 0, 0)
+        const endDate = new Date(selectedDate)
+        endDate.setHours(23, 59, 59, 999)
+
+        query = query
+          .gte('created_at', startDate.toISOString())
+          .lte('created_at', endDate.toISOString())
+      }
+
+      const { count, error } = await query
+      if (error) throw error
+      setProcessingCount(count || 0)
+    } catch (error) {
+      console.error('Error fetching processing count:', error)
+    }
+  }
+
+  // Fetch jumlah order completed dari database
+  const fetchCompletedCount = async () => {
+    try {
+      let query = supabase
+        .from('orders')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'completed')
+
+      if (selectedDate) {
+        const startDate = new Date(selectedDate)
+        startDate.setHours(0, 0, 0, 0)
+        const endDate = new Date(selectedDate)
+        endDate.setHours(23, 59, 59, 999)
+
+        query = query
+          .gte('created_at', startDate.toISOString())
+          .lte('created_at', endDate.toISOString())
+      }
+
+      const { count, error } = await query
+      if (error) throw error
+      setCompletedCount(count || 0)
+    } catch (error) {
+      console.error('Error fetching completed count:', error)
+    }
+  }
+
+  // Fetch jumlah order cancelled dari database
+  const fetchCancelledCount = async () => {
+    try {
+      let query = supabase
+        .from('orders')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'cancelled')
+
+      if (selectedDate) {
+        const startDate = new Date(selectedDate)
+        startDate.setHours(0, 0, 0, 0)
+        const endDate = new Date(selectedDate)
+        endDate.setHours(23, 59, 59, 999)
+
+        query = query
+          .gte('created_at', startDate.toISOString())
+          .lte('created_at', endDate.toISOString())
+      }
+
+      const { count, error } = await query
+      if (error) throw error
+      setCancelledCount(count || 0)
+    } catch (error) {
+      console.error('Error fetching cancelled count:', error)
+    }
+  }
+
+  // Fungsi untuk menghitung pendapatan hari ini dari database
+  const fetchTodayRevenue = async () => {
+    try {
+      let query = supabase
+        .from('orders')
+        .select('total_amount')
+
+      // Filter berdasarkan tanggal jika dipilih
+      if (selectedDate) {
+        const startDate = new Date(selectedDate)
+        startDate.setHours(0, 0, 0, 0)
+        const endDate = new Date(selectedDate)
+        endDate.setHours(23, 59, 59, 999)
+
+        query = query
+          .gte('created_at', startDate.toISOString())
+          .lte('created_at', endDate.toISOString())
+      } else {
+        // Default: hari ini
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+        const tomorrow = new Date(today)
+        tomorrow.setDate(tomorrow.getDate() + 1)
+
+        query = query
+          .gte('created_at', today.toISOString())
+          .lt('created_at', tomorrow.toISOString())
+      }
+
+      const { data: revenueData, error: revenueError } = await query
+
+      if (revenueError) throw revenueError
+
+      // Hitung total revenue
+      const revenue = revenueData?.reduce((sum, order) => sum + order.total_amount, 0) || 0
+      setTodayRevenue(revenue)
+
+    } catch (error: any) {
+      console.error('Error fetching today revenue:', error)
+    }
+  }
+
+  // Fungsi untuk menghitung total revenue dari database
+  const fetchTotalRevenue = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('total_amount')
+        .eq('status', 'completed')
+
+      if (error) throw error
+
+      const revenue = data?.reduce((sum, order) => sum + order.total_amount, 0) || 0
+      setTotalRevenue(revenue)
+
+    } catch (error: any) {
+      console.error('Error fetching total revenue:', error)
+    }
+  }
+
+  // Fungsi untuk menghitung jumlah order hari ini
+  const fetchTodayOrdersCount = async () => {
+    try {
+      let query = supabase
+        .from('orders')
+        .select('id', { count: 'exact', head: true })
+
+      if (selectedDate) {
+        const startDate = new Date(selectedDate)
+        startDate.setHours(0, 0, 0, 0)
+        const endDate = new Date(selectedDate)
+        endDate.setHours(23, 59, 59, 999)
+
+        query = query
+          .gte('created_at', startDate.toISOString())
+          .lte('created_at', endDate.toISOString())
+      } else {
+        // Default: hari ini
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+        const tomorrow = new Date(today)
+        tomorrow.setDate(tomorrow.getDate() + 1)
+
+        query = query
+          .gte('created_at', today.toISOString())
+          .lt('created_at', tomorrow.toISOString())
+      }
+
+      const { count, error } = await query
+
+      if (error) throw error
+      setTodayOrdersCount(count || 0)
+
+    } catch (error: any) {
+      console.error('Error fetching today orders count:', error)
+    }
+  }
+
+  // Fungsi untuk mengambil semua statistik sekaligus
+  const fetchAllStats = async () => {
+    try {
+      setStatsLoading(true)
+      await Promise.all([
+        fetchPendingCount(),
+        fetchProcessingCount(),
+        fetchCompletedCount(),
+        fetchCancelledCount(),
+        fetchTodayRevenue(),
+        fetchTotalRevenue(),
+        fetchTodayOrdersCount()
+      ])
+    } catch (error) {
+      console.error('Error fetching all stats:', error)
+    } finally {
+      setStatsLoading(false)
+    }
+  }
 
   // Fetch total count orders
   const fetchTotalOrders = async () => {
@@ -324,6 +652,11 @@ export default function OrdersPage() {
         query = query.eq('status', statusFilter)
       }
 
+      // Filter by order type - DIHAPUS
+      // if (orderTypeFilter !== 'all') {
+      //   query = query.eq('order_type', orderTypeFilter)
+      // }
+
       const { count, error } = await query
 
       if (error) throw error
@@ -333,7 +666,7 @@ export default function OrdersPage() {
     }
   }
 
-  // Fetch orders dengan pagination
+  // Fetch orders dengan pagination - DIPERBAIKI
   const fetchOrders = async () => {
     try {
       setLoading(true)
@@ -345,16 +678,16 @@ export default function OrdersPage() {
       let query = supabase
         .from('orders')
         .select(`
-        *,
-        order_items(
           *,
-          products(*)
-        )
-      `, { count: 'exact' })
+          order_items(
+            *,
+            products(*)
+          )
+        `, { count: 'exact' })
         .order('created_at', { ascending: false })
         .range(from, to)
 
-      // Filter by date jika dipilih
+      // Filter by date - DIPERBAIKI: selalu filter berdasarkan tanggal
       if (selectedDate) {
         const startDate = new Date(selectedDate)
         startDate.setHours(0, 0, 0, 0)
@@ -381,6 +714,11 @@ export default function OrdersPage() {
         query = query.eq('status', statusFilter)
       }
 
+      // Filter by order type - DIHAPUS
+      // if (orderTypeFilter !== 'all') {
+      //   query = query.eq('order_type', orderTypeFilter)
+      // }
+
       const { data: ordersData, error: ordersError, count } = await query
 
       if (ordersError) {
@@ -390,9 +728,8 @@ export default function OrdersPage() {
 
       setOrders(ordersData || [])
       setTotalOrders(count || 0)
+      setFilteredOrders(ordersData || []) // Langsung set filtered orders
 
-      // Apply search filter jika ada
-      applySearchFilter(ordersData || [])
     } catch (error: any) {
       console.error('❌ Error fetching orders:', error)
       showAlert(
@@ -424,15 +761,6 @@ export default function OrdersPage() {
     setFilteredOrders(filtered)
   }
 
-  // Reset ke hari ini
-  const resetToToday = () => {
-    const today = new Date()
-    const todayFormatted = today.toISOString().split('T')[0]
-
-    setSelectedDate(todayFormatted)
-    setCurrentPage(1)
-  }
-
   // Fetch products
   const fetchProducts = async () => {
     try {
@@ -454,14 +782,39 @@ export default function OrdersPage() {
     }
   }
 
-  // Use effect untuk fetch data saat filter berubah
+  // ============================
+  // USE EFFECTS
+  // ============================
+
+  // Load konfigurasi dari localStorage saat pertama kali render
+  useEffect(() => {
+    const savedConfig = localStorage.getItem('printerConfig')
+    if (savedConfig) {
+      try {
+        setPrinterConfig(JSON.parse(savedConfig))
+      } catch (e) {
+        console.error('Error loading printer config:', e)
+      }
+    }
+
+    // Cek dukungan Bluetooth
+    checkBluetoothSupport()
+  }, [])
+
+  // Save konfigurasi ke localStorage saat berubah
+  useEffect(() => {
+    localStorage.setItem('printerConfig', JSON.stringify(printerConfig))
+  }, [printerConfig])
+
+  // Use effect untuk fetch data saat pertama kali load
   useEffect(() => {
     const fetchInitialData = async () => {
+      await fetchProducts()
       await fetchOrders()
       await fetchTotalOrders()
-      await fetchProducts()
+      await fetchAllStats()
     }
-    
+
     fetchInitialData()
     checkMobile()
 
@@ -470,7 +823,7 @@ export default function OrdersPage() {
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
-  // Effect untuk handle perubahan selectedDate
+  // Effect untuk handle perubahan selectedDate - DIPERBAIKI
   useEffect(() => {
     if (isInitialMount.current) {
       isInitialMount.current = false
@@ -479,24 +832,37 @@ export default function OrdersPage() {
 
     // Cek jika selectedDate benar-benar berubah
     if (selectedDate !== prevSelectedDateRef.current) {
-      console.log('Selected date changed from', prevSelectedDateRef.current, 'to', selectedDate)
+      console.log('Selected date changed to:', selectedDate)
       prevSelectedDateRef.current = selectedDate
-      
+
       // Reset ke halaman 1 dan fetch data
       setCurrentPage(1)
-      fetchOrders()
-      fetchTotalOrders()
+
+      // Fetch semua data terkait tanggal
+      const fetchData = async () => {
+        await fetchOrders()
+        await fetchTotalOrders()
+        await fetchAllStats()
+      }
+
+      fetchData()
     }
   }, [selectedDate])
 
-  // Effect untuk handle perubahan statusFilter
+  // Effect untuk handle perubahan statusFilter - DIPERBAIKI
   useEffect(() => {
     if (isInitialMount.current) return
 
     console.log('Status filter changed to:', statusFilter)
     setCurrentPage(1)
-    fetchOrders()
-    fetchTotalOrders()
+
+    const fetchData = async () => {
+      await fetchOrders()
+      await fetchTotalOrders()
+      await fetchAllStats()
+    }
+
+    fetchData()
   }, [statusFilter])
 
   // Effect untuk handle perubahan pagination
@@ -504,8 +870,13 @@ export default function OrdersPage() {
     if (isInitialMount.current) return
 
     console.log('Pagination changed:', { currentPage, itemsPerPage })
-    fetchOrders()
-    fetchTotalOrders()
+
+    const fetchData = async () => {
+      await fetchOrders()
+      await fetchTotalOrders()
+    }
+
+    fetchData()
   }, [currentPage, itemsPerPage])
 
   // Update useEffect untuk search
@@ -521,6 +892,35 @@ export default function OrdersPage() {
   const checkMobile = () => {
     setIsMobile(window.innerWidth < 768)
   }
+
+  // Load data ke form update ketika order dipilih - DIPERBAIKI
+  useEffect(() => {
+    if (selectedOrder) {
+      // Format items untuk update form
+      const formattedItems = selectedOrder.order_items?.map(item => ({
+        id: item.id,
+        product_id: item.product_id,
+        quantity: item.quantity,
+        price: item.price,
+        product_name: item.products?.name,
+        subtotal: item.price * item.quantity
+      })) || []
+
+      setUpdateForm({
+        customer_name: selectedOrder.customer_name || '',
+        customer_phone: selectedOrder.customer_phone || '',
+        payment_method: selectedOrder.payment_method || 'cash',
+        notes: selectedOrder.notes || '',
+        status: selectedOrder.status,
+        order_type: selectedOrder.order_type || 'openbill',
+        items: formattedItems
+      })
+    }
+  }, [selectedOrder])
+
+  // ============================
+  // PAGINATION FUNCTIONS
+  // ============================
 
   // Pagination controls
   const totalPages = Math.ceil(totalOrders / itemsPerPage)
@@ -545,6 +945,10 @@ export default function OrdersPage() {
     }
   }
 
+  // ============================
+  // HANDLER FUNCTIONS
+  // ============================
+
   // Handle search
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchTerm(e.target.value)
@@ -555,13 +959,20 @@ export default function OrdersPage() {
     const newDate = e.target.value
     console.log('Date changed to:', newDate)
     setSelectedDate(newDate)
-    // Tidak perlu panggil fetchOrders di sini, useEffect akan handle
   }
 
   // Handle status filter change
   const handleStatusFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setStatusFilter(e.target.value)
-    // Tidak perlu panggil fetchOrders di sini, useEffect akan handle
+  }
+
+  // Reset ke hari ini
+  const resetToToday = () => {
+    const today = new Date()
+    const todayFormatted = today.toISOString().split('T')[0]
+
+    setSelectedDate(todayFormatted)
+    setCurrentPage(1)
   }
 
   // Clear date filter
@@ -739,6 +1150,264 @@ export default function OrdersPage() {
     )
   }
 
+  const printToBluetoothPrinter = async (order: Order) => {
+    if (!bluetoothPrinter?.characteristic) {
+      showAlert(
+        'Printer Belum Terhubung',
+        'Printer Bluetooth belum terhubung. Akan menggunakan print browser.',
+        'warning',
+        () => printStrukBrowser(order)
+      )
+      return
+    }
+
+    try {
+      setIsPrinting(true)
+
+      // ESC/POS commands
+      const ESC = '\x1B'
+      const LF = '\x0A'
+      const FS = '\x1C'
+      const GS = '\x1D'
+
+      // Tipe data untuk Order
+      interface OrderItem {
+        quantity: number
+        price: number
+        products?: {
+          name: string
+        }
+      }
+
+      interface Order {
+        order_number: string
+        created_at: string | Date
+        status: string
+        customer_name?: string
+        order_items?: OrderItem[]
+        total_amount: number
+        payment_method: string
+      }
+
+      // Tipe data untuk Printer Config
+      interface PrinterConfig {
+        boldTitle: boolean
+        storeName: string
+        storeAddress: string
+        storePhone: string
+        storeKasir: string
+        paperWidth: number
+      }
+
+      // Helper function untuk format currency
+      const formatCurrency = (amount: number): string => {
+        return amount.toLocaleString('id-ID')
+      }
+
+      // Helper function untuk payment method label
+      const getPaymentMethodLabel = (method: string): string => {
+        const methods: { [key: string]: string } = {
+          'cash': 'CASH',
+          'transfer': 'TRANSFER',
+          'qris': 'QRIS',
+          'debit': 'KARTU DEBIT',
+          'credit': 'KARTU KREDIT'
+        }
+        return methods[method] || method.toUpperCase()
+      }
+
+      // Struktur struk yang efisien
+      const generateEfficientStruk = (order: Order, printerConfig: PrinterConfig): string => {
+        const lines: string[] = []
+
+        // Initialize printer
+        lines.push(ESC + '@')
+
+        // Header - Center aligned
+        lines.push(ESC + 'a' + '\x01')
+
+        // Store name dengan bold jika diaktifkan
+        if (printerConfig.boldTitle) {
+          lines.push(ESC + 'E' + '\x01')
+        }
+        lines.push(printerConfig.storeName)
+        lines.push(LF)
+
+        if (printerConfig.boldTitle) {
+          lines.push(ESC + 'E' + '\x00') // Bold off
+        }
+
+        // Store info
+        lines.push(printerConfig.storeAddress)
+        lines.push(LF)
+        lines.push('Telp: ' + printerConfig.storePhone)
+        lines.push(LF)
+
+        // Separator
+        lines.push('='.repeat(printerConfig.paperWidth === 80 ? 40 : 32))
+        lines.push(LF)
+
+        // Left align untuk konten
+        lines.push(ESC + 'a' + '\x00')
+
+        // Order info (singkat)
+        lines.push('No: ' + order.order_number)
+        lines.push(LF)
+
+        const orderDate = new Date(order.created_at)
+        lines.push('Tgl: ' + orderDate.toLocaleDateString('id-ID')) + ('Jam: ' + orderDate.toLocaleTimeString('id-ID', {
+          hour: '2-digit',
+          minute: '2-digit'
+        }))
+        {/*  lines.push(LF)
+        lines.push('Wkt: ' + orderDate.toLocaleTimeString('id-ID', {
+          hour: '2-digit',
+          minute: '2-digit'
+        })) */}
+        lines.push(LF)
+        lines.push('Kasir: ' + printerConfig.storeKasir)
+        lines.push(LF)
+
+
+        // Customer info jika ada
+        if (order.customer_name) {
+          lines.push('Cust: ' + order.customer_name.substring(0, 15))
+          lines.push(LF)
+        }
+        // Payment info - PASTIKAN PAYMENT_METHOD ADA
+        const paymentMethod = order.payment_method || 'cash'
+        lines.push('Payment: ' + getPaymentMethodLabel(paymentMethod))
+        lines.push(LF)
+
+
+        // Separator
+        lines.push('-'.repeat(printerConfig.paperWidth === 80 ? 40 : 32))
+        lines.push(LF)
+
+        // FORMAT YANG RAPIH DENGAN PENJAGAAN UNTUK ORDER_ITEMS
+        const paperWidth = printerConfig.paperWidth === 80 ? 40 : 32
+
+        // Header tabel
+        const header = 'ITEM'.padEnd(19) + 'QTY'.padStart(3) + 'SUBTOTAL'.padStart(10)
+        lines.push(header)
+        lines.push(LF)
+        lines.push('-'.repeat(paperWidth))
+        lines.push(LF)
+
+        // Items - DENGAN PENJAGAAN UNTUK ORDER_ITEMS YANG MUNGKIN UNDEFINED
+        if (order.order_items && order.order_items.length > 0) {
+          // Gunakan slice hanya jika order_items ada
+          const itemsToShow = order.order_items.slice(0, 10)
+
+          itemsToShow.forEach((item: OrderItem) => {
+            const productName = item.products?.name || 'Produk'
+
+            // Potong nama jika terlalu panjang
+            let itemName = productName
+            if (productName.length > 17) {
+              itemName = productName.substring(0, 15) + '..'
+            }
+
+            const qty = item.quantity.toString().padStart(2)
+            const subtotal = formatCurrency(item.price * item.quantity).padStart(8)
+
+            // Format: ITEM(19 chars) + QTY(3 chars) + SUBTOTAL(10 chars)
+            const itemLine = itemName.padEnd(19) + qty.padStart(3) + subtotal.padStart(10)
+            lines.push(itemLine)
+            lines.push(LF)
+          })
+
+          // Tampilkan pesan jika ada item lebih dari 10
+          if (order.order_items.length > 10) {
+            lines.push(`...+${order.order_items.length - 10} item lain`)
+            lines.push(LF)
+          }
+        } else {
+          // Jika tidak ada items
+          lines.push('Tidak ada item'.padStart(paperWidth))
+          lines.push(LF)
+        }
+
+        // Separator
+        lines.push('-'.repeat(paperWidth))
+        lines.push(LF)
+
+        // TOTAL dengan justify - PASTIKAN TOTAL_AMOUNT ADA
+        const totalAmount = order.total_amount || 0
+        const totalLabel = 'TOTAL:'
+        const totalValue = 'Rp ' + formatCurrency(totalAmount)
+
+        // Hitung spasi yang dibutuhkan untuk justify
+        const spacesNeeded = paperWidth - totalLabel.length - totalValue.length
+        const totalLine = totalLabel + ' '.repeat(Math.max(1, spacesNeeded)) + totalValue
+
+        lines.push(ESC + 'E' + '\x01') // Bold on
+        lines.push(totalLine)
+        lines.push(LF)
+        lines.push(ESC + 'E' + '\x00') // Bold off
+
+        // Separator akhir
+        lines.push('='.repeat(paperWidth))
+        lines.push(LF)
+
+        // Footer - Center aligned
+        lines.push(ESC + 'a' + '\x01')
+        lines.push('Terima kasih atas kunjungan Anda')
+        lines.push(LF)
+        lines.push('*** ' + new Date().toLocaleDateString('id-ID') + ' ***')
+        lines.push(LF)
+
+        // Feed beberapa baris
+        lines.push(ESC + 'd' + '\x03') // Feed 3 lines
+
+        // Cut paper
+        lines.push(GS + 'V' + '\x41' + '\x00')
+
+        return lines.join('')
+      }
+
+      // Untuk menggunakan dengan kode lama Anda:
+      const strukData = generateEfficientStruk(order, printerConfig)
+
+      const encoder = new TextEncoder()
+      const data = encoder.encode(strukData)
+
+      // Bagi menjadi chunk
+      const chunks = chunkData(data, printerConfig.chunkSize)
+      setPrintProgress({ current: 0, total: chunks.length })
+
+      // Kirim data per chunk
+      for (let i = 0; i < chunks.length; i++) {
+        await bluetoothPrinter.characteristic.writeValue(chunks[i])
+        setPrintProgress({ current: i + 1, total: chunks.length })
+
+        if (printerConfig.chunkDelay > 0) {
+          await new Promise(resolve => setTimeout(resolve, printerConfig.chunkDelay))
+        }
+      }
+
+      // Reset progress
+      setPrintProgress({ current: 0, total: 0 })
+
+      showAlert(
+        'Struk Berhasil Dicetak',
+        'Struk telah berhasil dicetak!',
+        'success'
+      )
+
+    } catch (error: any) {
+      console.error('Error printing to Bluetooth:', error)
+      showAlert(
+        'Gagal Mencetak ke Bluetooth',
+        'Gagal mencetak ke printer Bluetooth: ' + error.message + '\n\nMencoba print via browser...',
+        'warning',
+        () => printStrukBrowser(order)
+      )
+    } finally {
+      setIsPrinting(false)
+    }
+  }
+
   // Disconnect printer
   const disconnectPrinter = () => {
     if (bluetoothPrinter?.device?.gatt?.connected) {
@@ -753,10 +1422,8 @@ export default function OrdersPage() {
   }
 
   // ============================
-  // FUNGSI CETAK ESC/POS DENGAN CHUNKING
+  // FUNGSI CETAK
   // ============================
-
-  // Fungsi untuk membagi data menjadi chunk-chunk kecil
   const chunkData = (data: Uint8Array, chunkSize: number): Uint8Array[] => {
     const chunks: Uint8Array[] = []
     for (let i = 0; i < data.length; i += chunkSize) {
@@ -765,350 +1432,6 @@ export default function OrdersPage() {
     return chunks
   }
 
-  // Fungsi write dengan retry logic
-  const writeWithRetry = async (characteristic: any, data: Uint8Array, maxRetries = 3): Promise<boolean> => {
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        await characteristic.writeValue(data)
-        return true
-      } catch (error: any) {
-        console.error(`Attempt ${attempt} failed:`, error.message)
-
-        if (attempt === maxRetries) {
-          throw error
-        }
-
-        // Wait before retry
-        await new Promise(resolve => setTimeout(resolve, 100 * attempt))
-      }
-    }
-    return false
-  }
-
-  // Generate ESC/POS commands yang efisien
-  const generateEfficientStruk = (order: Order): string => {
-    const ESC = '\x1B'
-    const GS = '\x1D'
-    const LF = '\x0A'
-
-    const lines: string[] = []
-
-    // Initialize printer
-    lines.push(ESC + '@')
-
-    // Header - Center aligned
-    lines.push(ESC + 'a' + '\x01')
-
-    if (printerConfig.showLogo) {
-      // Font size
-      lines.push(GS + '!' + String.fromCharCode(printerConfig.fontSize))
-
-      // Bold jika diaktifkan
-      if (printerConfig.boldTitle) {
-        lines.push(ESC + 'E' + '\x01')
-      }
-
-      lines.push(printerConfig.storeName.substring(0, 20))
-      lines.push(LF)
-
-      // Reset bold
-      lines.push(ESC + 'E' + '\x00')
-
-      // Reset font size
-      lines.push(GS + '!' + '\x00')
-
-      lines.push(printerConfig.storeAddress.substring(0, 30))
-      lines.push(LF)
-      lines.push('Telp: ' + printerConfig.storePhone)
-      lines.push(LF)
-    }
-    
-    // Separator
-    lines.push('='.repeat(printerConfig.paperWidth === 80 ? 40 : 32))
-    lines.push(LF)
-    
-    // Left align untuk konten
-    lines.push(ESC + 'a' + '\x00')
-    
-    // Order info (singkat)
-    lines.push('No: ' + order.order_number)
-    lines.push(LF)
-    lines.push('Tgl: ' + new Date(order.created_at).toLocaleDateString('id-ID'))
-    lines.push(LF)
-    lines.push('Wkt: ' + new Date(order.created_at).toLocaleTimeString('id-ID', {
-      hour: '2-digit',
-      minute: '2-digit'
-    }))
-    lines.push(LF)
-    
-    if (order.completed_at) {
-      lines.push('Sls: ' + new Date(order.completed_at).toLocaleTimeString('id-ID', {
-        hour: '2-digit',
-        minute: '2-digit'
-      }))
-      lines.push(LF)
-    }
-    
-    
-    lines.push('Kasir: Ilham')
-    lines.push(LF)
-    lines.push('Status: ' + order.status.toUpperCase())
-    lines.push(LF)
-
-    // Customer info jika ada
-    if (order.customer_name) {
-      lines.push('Cust: ' + order.customer_name.substring(0, 15))
-      lines.push(LF)
-    }
-    if (order.customer_phone) {
-      lines.push('Telp: ' + order.customer_phone)
-      lines.push(LF)
-    }
-
-    // Separator
-    lines.push('-'.repeat(printerConfig.paperWidth === 80 ? 40 : 32))
-    lines.push(LF)
-
-    // Header tabel
-    const maxWidth = printerConfig.paperWidth === 80 ? 20 : 16
-    lines.push('ITEM'.padEnd(maxWidth - 8) + 'QTY   HARGA')
-    lines.push(LF)
-    lines.push('-'.repeat(printerConfig.paperWidth === 80 ? 40 : 32))
-    lines.push(LF)
-
-    // Items - maksimal 10 item, nama dipotong
-    if (order.order_items && order.order_items.length > 0) {
-      order.order_items.slice(0, 10).forEach((item) => {
-        const productName = item.products?.name || 'Produk'
-        const truncatedName = productName.length > maxWidth - 10
-          ? productName.substring(0, maxWidth - 10) + '..'
-          : productName
-
-        const qty = item.quantity.toString().padStart(2)
-        const price = (item.price * item.quantity).toLocaleString('id-ID')
-
-        const line = truncatedName.padEnd(maxWidth - 6) + qty + '   ' + price.padStart(8)
-        lines.push(line)
-        lines.push(LF)
-      })
-
-      if (order.order_items.length > 10) {
-        lines.push(`...+${order.order_items.length - 10} item lain`)
-        lines.push(LF)
-      }
-    } else {
-      lines.push('Tidak ada item')
-      lines.push(LF)
-    }
-
-    // Separator
-    lines.push('-'.repeat(printerConfig.paperWidth === 80 ? 40 : 32))
-    lines.push(LF)
-
-    // Total - Right aligned dan Bold
-    lines.push(ESC + 'a' + '\x02') // Right align
-    lines.push(ESC + 'E' + '\x01') // Bold on
-    lines.push('TOTAL: Rp ' + order.total_amount.toLocaleString('id-ID').padStart(10))
-    lines.push(LF)
-    lines.push(ESC + 'E' + '\x00') // Bold off
-
-    // Pembayaran
-    lines.push(ESC + 'a' + '\x00') // Left align
-    lines.push('Bayar: ' + getPaymentMethodLabel(order.payment_method))
-    lines.push(LF)
-
-    // Catatan jika ada (dibatasi)
-    if (order.notes && order.notes.trim()) {
-      lines.push('-'.repeat(printerConfig.paperWidth === 80 ? 40 : 32))
-      lines.push(LF)
-      lines.push('Catatan:')
-      lines.push(LF)
-
-      // Split catatan menjadi baris-baris pendek
-      const maxNoteLength = printerConfig.paperWidth === 80 ? 38 : 30
-      const notes = order.notes
-      for (let i = 0; i < notes.length; i += maxNoteLength) {
-        const line = notes.substring(i, i + maxNoteLength)
-        lines.push(line)
-        lines.push(LF)
-      }
-    }
-
-    // Separator akhir
-    lines.push('='.repeat(printerConfig.paperWidth === 80 ? 40 : 32))
-    lines.push(LF)
-
-    // Footer - Center aligned
-    lines.push(ESC + 'a' + '\x01')
-    lines.push('Terima kasih')
-    lines.push(LF)
-    lines.push('*** ' + new Date().toLocaleDateString('id-ID') + ' ***')
-    lines.push(LF)
-
-    // Feed beberapa baris
-    lines.push(ESC + 'd' + '\x03') // Feed 3 lines
-
-    // Cut paper (partial cut)
-    lines.push(GS + 'V' + '\x41' + '\x00')
-
-    return lines.join('')
-  }
-
-  // Print ke Bluetooth printer dengan chunking
-  const printToBluetooth = async (order: Order): Promise<boolean> => {
-    if (!bluetoothPrinter?.characteristic) {
-      showAlert(
-        'Printer Belum Terhubung',
-        'Printer Bluetooth belum terhubung. Silakan hubungkan printer terlebih dahulu.',
-        'warning'
-      )
-      return false
-    }
-
-    try {
-      setIsPrinting(true)
-      setPrintProgress({ current: 0, total: 0 })
-
-      // Generate ESC/POS commands
-      const commands = generateEfficientStruk(order)
-      const encoder = new TextEncoder()
-      const data = encoder.encode(commands)
-
-      console.log(`🖨️ Data size: ${data.length} bytes`)
-
-      // Bagi data menjadi chunk-chunk kecil
-      const chunks = chunkData(data, printerConfig.chunkSize)
-      setPrintProgress({ current: 0, total: chunks.length })
-
-      console.log(`📦 Sending ${chunks.length} chunks (${printerConfig.chunkSize} bytes each)`)
-
-      // Kirim setiap chunk dengan delay
-      for (let i = 0; i < chunks.length; i++) {
-        try {
-          console.log(`Sending chunk ${i + 1}/${chunks.length} (${chunks[i].length} bytes)`)
-
-          await writeWithRetry(bluetoothPrinter.characteristic, chunks[i])
-          setPrintProgress({ current: i + 1, total: chunks.length })
-
-          // Delay kecil antar chunk
-          if (i < chunks.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, printerConfig.chunkDelay))
-          }
-        } catch (error: any) {
-          console.error(`Error sending chunk ${i + 1}:`, error)
-
-          if (error.message.includes('512 bytes')) {
-            showAlert(
-              'Ukuran Data Terlalu Besar',
-              `Chunk terlalu besar (${chunks[i].length} bytes). Mengurangi ukuran chunk...`,
-              'warning'
-            )
-
-            // Coba dengan chunk size yang lebih kecil
-            const smallerChunks = chunkData(data, 100)
-            return await printWithChunks(smallerChunks)
-          }
-
-          throw error
-        }
-      }
-
-      console.log('✅ Print berhasil')
-      setPrintProgress({ current: 0, total: 0 })
-      return true
-
-    } catch (error: any) {
-      console.error('❌ Error printing:', error)
-      setPrintProgress({ current: 0, total: 0 })
-
-      if (error.message.includes('disconnected')) {
-        showAlert(
-          'Printer Terputus',
-          'Printer terputus. Silakan hubungkan kembali.',
-          'error'
-        )
-        setBluetoothPrinter(null)
-      } else if (error.message.includes('512 bytes')) {
-        showAlert(
-          'Error Mencetak',
-          'Error: Data terlalu besar. Mencoba metode alternatif...',
-          'warning'
-        )
-        return await printSimpleStruk(order)
-      } else {
-        showAlert(
-          'Gagal Mencetak',
-          'Gagal mencetak: ' + error.message,
-          'error'
-        )
-      }
-
-      return false
-    } finally {
-      setIsPrinting(false)
-    }
-  }
-
-  // Fungsi helper untuk print dengan chunks
-  const printWithChunks = async (chunks: Uint8Array[]): Promise<boolean> => {
-    for (let i = 0; i < chunks.length; i++) {
-      try {
-        await bluetoothPrinter!.characteristic.writeValue(chunks[i])
-        await new Promise(resolve => setTimeout(resolve, 50))
-      } catch (error) {
-        console.error('Failed to print with smaller chunks')
-        return false
-      }
-    }
-    return true
-  }
-
-  // Versi struk yang sangat sederhana (fallback)
-  const printSimpleStruk = async (order: Order): Promise<boolean> => {
-    try {
-      // Generate struk sangat sederhana
-      const ESC = '\x1B'
-      const LF = '\x0A'
-
-      let commands = ''
-      commands += ESC + '@' // Initialize
-      commands += ESC + 'a' + '\x01' // Center
-      commands += 'STRUK' + LF
-      commands += order.order_number + LF
-      commands += new Date(order.created_at).toLocaleDateString('id-ID') + LF
-      commands += '-'.repeat(32) + LF
-
-      commands += ESC + 'a' + '\x00' // Left
-
-      // Total saja
-      commands += 'TOTAL: Rp ' + order.total_amount.toLocaleString('id-ID') + LF
-      commands += 'Status: ' + order.status.toUpperCase() + LF
-
-      commands += ESC + 'a' + '\x01' // Center
-      commands += 'Terima kasih' + LF
-
-      // Feed dan cut
-      commands += ESC + 'd' + '\x03'
-      commands += '\x1DV\x41\x00'
-
-      const encoder = new TextEncoder()
-      const data = encoder.encode(commands)
-
-      // Pastikan data kecil
-      if (data.length > 100) {
-        // Potong menjadi 100 bytes
-        const smallData = data.slice(0, 100)
-        await bluetoothPrinter!.characteristic.writeValue(smallData)
-      } else {
-        await bluetoothPrinter!.characteristic.writeValue(data)
-      }
-
-      return true
-    } catch (error) {
-      console.error('Simple print failed:', error)
-      return false
-    }
-  }
 
   // Print test page
   const printTestPage = async () => {
@@ -1175,22 +1498,25 @@ export default function OrdersPage() {
       setIsPrinting(false)
     }
   }
-
   // Print struk (fungsi utama)
-  const printStruk = async (order: Order) => {
-    // Cek jika Bluetooth printer sudah terhubung
-    if (bluetoothPrinter) {
-      const success = await printToBluetooth(order)
-      if (success) {
+const printStruk = async (order: Order, forcePrint: boolean = false) => {
+    // Cek jika order type openbill
+    if (order.order_type === 'openbill' && !forcePrint) {
+      // Jika status sudah completed, boleh cetak struk
+      if (order.status !== 'completed') {
         showAlert(
-          'Cetak Berhasil',
-          `Struk ${order.order_number} berhasil dicetak!`,
-          'success'
+          'Order Open Bill',
+          `Order ${order.order_number} adalah Open Bill.\nCetak struk hanya saat selesai/checkout.`,
+          'warning'
         )
-      } else {
-        // Fallback ke browser print
-        printStrukBrowser(order)
+        return
       }
+    }
+
+    // Proses printing untuk take away
+    if (bluetoothPrinter) {
+      // Logika print ke Bluetooth printer
+      await printToBluetoothPrinter(order)
     } else {
       // Fallback ke print browser jika Bluetooth tidak tersedia
       printStrukBrowser(order)
@@ -1238,6 +1564,21 @@ export default function OrdersPage() {
           .order-info {
             margin: 8px 0;
           }
+          .order-type {
+            text-align: center;
+            font-weight: bold;
+            margin: 5px 0;
+            padding: 3px;
+            border-radius: 4px;
+          }
+          .takeaway {
+            background-color: #d1fae5;
+            color: #065f46;
+          }
+          .dinein {
+            background-color: #dbeafe;
+            color: #1e40af;
+          }
           .items {
             margin: 10px 0;
             border-bottom: 1px dashed #000;
@@ -1260,7 +1601,7 @@ export default function OrdersPage() {
             text-align: right;
           }
           .total {
-            display :flex;
+            display: flex;
             justify-content: space-between;
             font-weight: bold;
             text-align: center;
@@ -1286,7 +1627,7 @@ export default function OrdersPage() {
           <div>${printerConfig.storeAddress}</div>
           <div>Telp: ${printerConfig.storePhone}</div>
         </div>
-        
+                
         <div class="order-info">
           <div><strong>No: ${order.order_number}</strong></div>
           <div>Tanggal: ${new Date(order.created_at).toLocaleDateString('id-ID')}</div>
@@ -1315,12 +1656,8 @@ export default function OrdersPage() {
         <div class="separator"></div>
         
         <div class="total">
-            <div>
-                  TOTAL: Rp 
-            </div>
-            <div>
-            ${order.total_amount.toLocaleString('id-ID')}
-            </div>
+            <div>TOTAL: Rp</div>
+            <div>${order.total_amount.toLocaleString('id-ID')}</div>
         </div>
         
         <div style="margin: 8px 0;">
@@ -1362,35 +1699,56 @@ export default function OrdersPage() {
   }
 
   // ============================
-  // FUNGSI DATABASE & ORDER
+  // FUNGSI ORDER CRUD
   // ============================
 
-  // Update order status
+  // Update order status dari tabel
   const updateOrderStatus = async (orderId: string, status: Order['status']) => {
     try {
-      // Jika mengubah ke completed, tampilkan konfirmasi cetak
+      const order = orders.find(o => o.id === orderId)
+
+      // Jika mengubah ke completed
       if (status === 'completed') {
-        const order = orders.find(o => o.id === orderId)
         if (order) {
-          setOrderToPrint(order)
-          setShowPrintConfirmation(true)
+          // Jika order_type openbill, tawarkan cetak struk
+          if (order.order_type === 'openbill') {
+            setOrderToPrint(order)
+            setShowPrintConfirmation(true)
+             // Jangan update dulu, tunggu konfirmasi cetak
+          } else if (order.order_type === 'closebill') {
+            // Untuk take away, auto print jika printer terhubung
+            showAlert(
+              'Order Selesai',
+              `Order ${order.order_number} telah diselesaikan!`,
+              'success'
+            )
+          }
         }
       }
 
-      // HANYA update status
+      // Update status saja
       const { error } = await supabase
         .from('orders')
-        .update({ status })
+        .update({
+          status
+        })
         .eq('id', orderId)
 
       if (error) throw error
 
-      // Refresh data dengan pagination yang sama
+      // Refresh data
       await fetchOrders()
       await fetchTotalOrders()
+      await fetchAllStats()
       setShowMobileMenu(null)
 
-      if (status !== 'completed') {
+      if (status === 'completed') {
+        showAlert(
+          'Order Selesai',
+          `Order ${order?.order_number} telah diselesaikan!`,
+          'success'
+        )
+      } else {
         showAlert(
           'Status Diupdate',
           'Status order berhasil diupdate',
@@ -1404,6 +1762,106 @@ export default function OrdersPage() {
         'Gagal mengupdate status order: ' + error.message,
         'error'
       )
+    }
+  }
+
+  // FUNGSI UNTUK UPDATE ITEMS DI MODAL DETAIL
+  const updateOrderItems = async () => {
+    if (!selectedOrder) return
+
+    try {
+      setIsUpdating(true)
+
+      // Hitung total baru
+      const newTotal = updateForm.items.reduce((sum, item) =>
+        sum + (item.price * item.quantity), 0
+      )
+
+      // Update order dengan total baru - TANPA updated_at
+      const { error: orderError } = await supabase
+        .from('orders')
+        .update({
+          total_amount: newTotal,
+          customer_name: updateForm.customer_name || null,
+          customer_phone: updateForm.customer_phone || null,
+          payment_method: updateForm.payment_method,
+          notes: updateForm.notes || null,
+          status: updateForm.status,
+          order_type: updateForm.order_type
+          // HAPUS: updated_at: new Date().toISOString()
+        })
+        .eq('id', selectedOrder.id)
+
+      if (orderError) throw orderError
+
+      // Hapus semua order_items lama
+      const { error: deleteError } = await supabase
+        .from('order_items')
+        .delete()
+        .eq('order_id', selectedOrder.id)
+
+      if (deleteError) throw deleteError
+
+      // Insert order_items baru
+      if (updateForm.items.length > 0) {
+        const orderItems = updateForm.items.map(item => ({
+          order_id: selectedOrder.id,
+          product_id: item.product_id,
+          quantity: item.quantity,
+          price: item.price,
+          subtotal: item.price * item.quantity
+        }))
+
+        const { error: itemsError } = await supabase
+          .from('order_items')
+          .insert(orderItems)
+
+        if (itemsError) throw itemsError
+      }
+
+      // Refresh data
+      await fetchOrders()
+      await fetchTotalOrders()
+      await fetchAllStats()
+
+      // Update selectedOrder dengan data baru - TANPA updated_at
+      const updatedOrder = {
+        ...selectedOrder,
+        total_amount: newTotal,
+        customer_name: updateForm.customer_name || undefined,
+        customer_phone: updateForm.customer_phone || undefined,
+        payment_method: updateForm.payment_method,
+        notes: updateForm.notes || undefined,
+        status: updateForm.status,
+        order_type: updateForm.order_type,
+        // HAPUS: updated_at: new Date().toISOString(),
+        order_items: updateForm.items.map(item => ({
+          id: item.id || '',
+          order_id: selectedOrder.id,
+          product_id: item.product_id,
+          quantity: item.quantity,
+          price: item.price,
+          subtotal: item.price * item.quantity,
+          products: products.find(p => p.id === item.product_id)
+        }))
+      } as Order
+
+      setSelectedOrder(updatedOrder)
+
+      showAlert(
+        'Berhasil Update',
+        `Order ${selectedOrder.order_number} berhasil diupdate!\nTotal baru: ${formatCurrency(newTotal)}`,
+        'success'
+      )
+    } catch (error: any) {
+      console.error('Error updating order:', error)
+      showAlert(
+        'Gagal Update',
+        'Gagal mengupdate order: ' + error.message,
+        'error'
+      )
+    } finally {
+      setIsUpdating(false)
     }
   }
 
@@ -1454,6 +1912,7 @@ export default function OrdersPage() {
           // Refresh data dengan pagination yang sama
           await fetchOrders()
           await fetchTotalOrders()
+          await fetchAllStats()
           setShowMobileMenu(null)
 
           showAlert(
@@ -1474,9 +1933,82 @@ export default function OrdersPage() {
       'Batal'
     )
   }
+  // ============================
+  // FUNGSI MANAJEMEN ITEMS DI MODAL DETAIL
+  // ============================
+
+  // Tambah item baru di modal detail
+  const addItemToUpdateForm = () => {
+    setUpdateForm(prev => ({
+      ...prev,
+      items: [...prev.items, {
+        product_id: '',
+        quantity: 1,
+        price: 0,
+        product_name: '',
+        subtotal: 0
+      }]
+    }))
+  }
+
+  // Update item di modal detail
+  const updateItemInUpdateForm = (index: number, field: string, value: any) => {
+    const newItems = [...updateForm.items]
+
+    if (field === 'product_id') {
+      const product = products.find(p => p.id === value)
+      if (product) {
+        newItems[index] = {
+          ...newItems[index],
+          product_id: value,
+          price: product.price,
+          product_name: product.name,
+          subtotal: product.price * newItems[index].quantity
+        }
+      }
+    } else if (field === 'quantity') {
+      const quantity = parseInt(value) || 1
+      newItems[index] = {
+        ...newItems[index],
+        quantity,
+        subtotal: newItems[index].price * quantity
+      }
+    } else if (field === 'price') {
+      const price = parseFloat(value) || 0
+      newItems[index] = {
+        ...newItems[index],
+        price,
+        subtotal: price * newItems[index].quantity
+      }
+    }
+
+    setUpdateForm(prev => ({ ...prev, items: newItems }))
+  }
+
+  // Hapus item dari modal detail
+  const removeItemFromUpdateForm = (index: number) => {
+    if (updateForm.items.length <= 1) {
+      showAlert(
+        'Peringatan',
+        'Order harus memiliki minimal 1 item',
+        'warning'
+      )
+      return
+    }
+
+    setUpdateForm(prev => ({
+      ...prev,
+      items: prev.items.filter((_, i) => i !== index)
+    }))
+  }
+
+  // Hitung total untuk update form
+  const updateFormTotal = updateForm.items.reduce((sum, item) =>
+    sum + (item.price * item.quantity), 0
+  )
 
   // ============================
-  // FUNGSI FORM ORDER
+  // FUNGSI FORM ORDER BARU
   // ============================
 
   // Validasi form
@@ -1515,29 +2047,40 @@ export default function OrdersPage() {
     setSubmitLoading(true)
 
     try {
-      // Generate order number dengan format ORD-YYYYMMDD-XXXX
+      // Generate order number dengan format berdasarkan order type
       const now = new Date()
       const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '')
       const randomNum = Math.floor(Math.random() * 10000).toString().padStart(4, '0')
-      const orderNumber = `ORD-${dateStr}-${randomNum}`
+
+      // Format order number berbeda untuk openbill dan closebill
+      let orderNumber = ''
+      if (formData.order_type === 'openbill') {
+        orderNumber = `ORD-${dateStr}-${randomNum}`
+      } else {
+        orderNumber = `ORD-${dateStr}-${randomNum}`
+      }
+
+      // Tentukan status: completed untuk closebill, pending untuk openbill
+      const orderStatus = formData.order_type === 'closebill' ? 'completed' : 'pending'
 
       // Calculate total amount
       const total_amount = formData.items.reduce((sum, item) =>
         sum + (item.price * item.quantity), 0
       )
 
-      // Insert order
+      // Insert order dengan order_type dan status yang sesuai
       const { data: order, error: orderError } = await supabase
         .from('orders')
         .insert([
           {
             order_number: orderNumber,
             total_amount,
-            status: 'pending',
+            status: orderStatus, // Menggunakan status yang sudah ditentukan
             payment_method: formData.payment_method,
             customer_name: formData.customer_name || null,
             customer_phone: formData.customer_phone || null,
-            notes: formData.notes || null
+            notes: formData.notes || null,
+            order_type: formData.order_type
           }
         ])
         .select()
@@ -1560,37 +2103,56 @@ export default function OrdersPage() {
 
       if (itemsError) throw itemsError
 
+      // Build full order object dengan product details
+      const fullOrder = {
+        ...order,
+        order_items: orderItems.map((item, index) => ({
+          ...item,
+          products: products.find(p => p.id === formData.items[index].product_id)
+        }))
+      } as Order
+
       // Reset form dan refresh data
       resetForm()
       setShowCreateModal(false)
+
+      // Refresh data terlebih dahulu
       await fetchOrders()
       await fetchTotalOrders()
+      await fetchAllStats()
 
-      // Tampilkan konfirmasi
-      showAlert(
-        'Order Berhasil',
-        `✅ Order ${orderNumber} berhasil dibuat!\n\nTotal: Rp ${total_amount.toLocaleString('id-ID')}\nStatus: Pending`,
-        'success'
-      )
+      // Tampilkan konfirmasi berdasarkan jenis order
+      if (formData.order_type === 'closebill') {
+        // Untuk closebill, status sudah completed
+        let successMessage = `✅ Order ${orderNumber} berhasil dibuat!\n\nTotal: Rp ${total_amount.toLocaleString('id-ID')}\nStatus: Completed\nJenis: Close Bill (Take Away)`
 
-      // Otomatis print jika printer terhubung
-      if (bluetoothPrinter) {
-        const printSuccess = await printToBluetooth({
-          ...order,
-          order_items: orderItems.map((item, index) => ({
-            ...item,
-            products: products.find(p => p.id === formData.items[index].product_id)
-          }))
-        } as Order)
+        // Tampilkan alert dengan tombol print
+        showAlert(
+          'Order Close Bill Berhasil',
+          `Order ${orderNumber} telah berhasil dibuat sebagai Close Bill (Take Away).\n\nStatus: Completed\nTotal: ${formatCurrency(total_amount)}\n\nApakah Anda ingin mencetak struk sekarang?`,
+          'info',
+          () => {
+            // Call print function
+            if (bluetoothPrinter) {
+              printStruk(fullOrder)
+            } else {
+              printStrukBrowser(fullOrder)
+            }
+          },
+          'Ya, Cetak Sekarang',
+          'Nanti'
+        )
+      } else {
+        // Untuk openbill, status pending
+        let successMessage = `✅ Order ${orderNumber} berhasil dibuat!\n\nTotal: Rp ${total_amount.toLocaleString('id-ID')}\nStatus: Pending\nJenis: Open Bill`
 
-        if (!printSuccess) {
-          showAlert(
-            'Print Gagal',
-            'Order berhasil dibuat, tetapi gagal mencetak struk.',
-            'warning'
-          )
-        }
+        showAlert(
+          'Order Berhasil',
+          successMessage,
+          'success'
+        )
       }
+
     } catch (error: any) {
       console.error('Error creating order:', error)
       showAlert(
@@ -1602,7 +2164,6 @@ export default function OrdersPage() {
       setSubmitLoading(false)
     }
   }
-
   // Helper functions untuk form
   const addItemToOrder = () => {
     setFormData(prev => ({
@@ -1673,6 +2234,7 @@ export default function OrdersPage() {
       customer_phone: '',
       payment_method: 'cash',
       notes: '',
+      order_type: 'openbill',
       items: []
     })
   }
@@ -1704,76 +2266,6 @@ export default function OrdersPage() {
     setShowExportModal(false)
   }
 
-  // ============================
-  // HELPER FUNCTIONS
-  // ============================
-
-  // Helper functions untuk UI
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'pending': return 'bg-yellow-100 text-yellow-800 border-yellow-200'
-      case 'processing': return 'bg-blue-100 text-blue-800 border-blue-200'
-      case 'completed': return 'bg-green-100 text-green-800 border-green-200'
-      case 'cancelled': return 'bg-red-100 text-red-800 border-red-200'
-      default: return 'bg-gray-100 text-gray-800 border-gray-200'
-    }
-  }
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'pending': return <Clock className="h-4 w-4" />
-      case 'processing': return <Loader2 className="h-4 w-4 animate-spin" />
-      case 'completed': return <CheckCircle className="h-4 w-4" />
-      case 'cancelled': return <XCircle className="h-4 w-4" />
-      default: return <Clock className="h-4 w-4" />
-    }
-  }
-
-  const getPaymentMethodIcon = (method: string) => {
-    switch (method) {
-      case 'cash': return <CreditCard className="h-4 w-4" />
-      case 'card': return <CreditCard className="h-4 w-4" />
-      case 'qris': return <CreditCard className="h-4 w-4" />
-      case 'transfer': return <CreditCard className="h-4 w-4" />
-      case 'ovo': return <CreditCard className="h-4 w-4" />
-      case 'gopay': return <CreditCard className="h-4 w-4" />
-      default: return <CreditCard className="h-4 w-4" />
-    }
-  }
-
-  const getPaymentMethodLabel = (method: string) => {
-    const paymentMethod = PAYMENT_METHODS.find(pm => pm.value === method)
-    return paymentMethod ? paymentMethod.label : method
-  }
-
-  const totalAmount = formData.items.reduce((sum, item) =>
-    sum + (item.price * item.quantity), 0
-  )
-
-  const totalItems = formData.items.reduce((sum, item) => sum + item.quantity, 0)
-
-  // Format currency
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('id-ID', {
-      style: 'currency',
-      currency: 'IDR',
-      minimumFractionDigits: 0
-    }).format(amount)
-  }
-
-  // Calculate totals for dashboard
-  const totalRevenue = orders
-    .filter(order => order.status === 'completed')
-    .reduce((sum, order) => sum + order.total_amount, 0)
-
-  const todayOrders = orders.filter(order => {
-    const orderDate = new Date(order.created_at).toDateString()
-    const today = new Date().toDateString()
-    return orderDate === today
-  })
-
-  const todayRevenue = todayOrders.reduce((sum, order) => sum + order.total_amount, 0)
-
   // Toggle expanded row untuk detail produk
   const toggleRowExpansion = (orderId: string) => {
     const newExpanded = new Set(expandedRows)
@@ -1784,6 +2276,10 @@ export default function OrdersPage() {
     }
     setExpandedRows(newExpanded)
   }
+
+  const totalAmount = formData.items.reduce((sum, item) =>
+    sum + (item.price * item.quantity), 0
+  )
 
   // Empty state handler
   const showEmptyState = () => {
@@ -1936,52 +2432,84 @@ export default function OrdersPage() {
         </div>
       </div>
 
-      {/* Stats Cards */}
+      {/* Stats Cards - SEMUA DATA DARI DATABASE */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+        {/* Order Hari Ini */}
         <div className="bg-white rounded-xl p-4 shadow-sm border border-amber-100">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-600">Order Hari ini</p>
-              <p className="text-xl md:text-2xl font-bold text-gray-900">{todayOrders.length}</p>
+              <p className="text-sm text-gray-600">Order {selectedDate ? 'Terpilih' : 'Hari Ini'}</p>
+              {statsLoading ? (
+                <div className="animate-pulse">
+                  <div className="h-7 w-12 bg-gray-200 rounded"></div>
+                </div>
+              ) : (
+                <p className="text-xl md:text-2xl font-bold text-gray-900">{todayOrdersCount}</p>
+              )}
               <p className="text-xs text-gray-500 mt-1">{totalOrders} total order</p>
             </div>
             <ShoppingCart className="h-7 w-7 md:h-8 md:w-8 text-amber-600" />
           </div>
         </div>
 
+        {/* Pendapatan */}
+        <div className="bg-white rounded-xl p-4 shadow-sm border border-amber-100">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-600">Pendapatan {selectedDate ? 'Terpilih' : 'Hari Ini'}</p>
+              {statsLoading ? (
+                <div className="animate-pulse">
+                  <div className="h-7 w-12 bg-gray-200 rounded"></div>
+                </div>
+              ) : (
+                <p className="text-xl md:text-2xl font-bold text-green-600">
+                  {formatCurrency(todayRevenue)}
+                </p>
+              )}
+            </div>
+            <CreditCard className="h-7 w-7 md:h-8 md:w-8 text-green-600" />
+          </div>
+        </div>
+
+        {/* PENDING - DATA DARI DATABASE */}
         <div className="bg-white rounded-xl p-4 shadow-sm border border-amber-100">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600">Pending</p>
-              <p className="text-xl md:text-2xl font-bold text-yellow-600">
-                {orders.filter(o => o.status === 'pending').length}
+              {statsLoading ? (
+                <div className="animate-pulse">
+                  <div className="h-7 w-12 bg-gray-200 rounded"></div>
+                </div>
+              ) : (
+                <p className="text-xl md:text-2xl font-bold text-yellow-600">
+                  {pendingCount}
+                </p>
+              )}
+              <p className="text-xs text-gray-500 mt-1">
+                {processingCount} processing
               </p>
             </div>
             <Clock className="h-7 w-7 md:h-8 md:w-8 text-yellow-600" />
           </div>
         </div>
 
-        <div className="bg-white rounded-xl p-4 shadow-sm border border-amber-100">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-gray-600">Pendapatan Hari ini.</p>
-              <p className="text-xl md:text-2xl font-bold text-green-600">
-               {formatCurrency(todayRevenue)}
-              </p>
-              <p className="text-xs text-gray-500 mt-1">{formatCurrency(totalRevenue)} total</p>
-            </div>
-            <CreditCard className="h-7 w-7 md:h-8 md:w-8 text-green-600" />
-          </div>
-        </div>
 
+
+        {/* COMPLETED - DATA DARI DATABASE */}
         <div className="bg-white rounded-xl p-4 shadow-sm border border-amber-100">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-600">Completed</p>
-              <p className="text-xl md:text-2xl font-bold text-green-600">
-                {orders.filter(o => o.status === 'completed').length}
-              </p>
-              <p className="text-xs text-gray-500 mt-1">{formatCurrency(todayRevenue)} hari ini</p>
+              {statsLoading ? (
+                <div className="animate-pulse">
+                  <div className="h-7 w-12 bg-gray-200 rounded"></div>
+                </div>
+              ) : (
+                <p className="text-xl md:text-2xl font-bold text-green-600">
+                  {completedCount}
+                </p>
+              )}
+              <p className="text-xs text-gray-500 mt-1">{cancelledCount} cancelled</p>
             </div>
             <CheckCircle className="h-7 w-7 md:h-8 md:w-8 text-green-600" />
           </div>
@@ -2026,6 +2554,17 @@ export default function OrdersPage() {
               <option value="completed">Completed</option>
               <option value="cancelled">Cancelled</option>
             </select>
+
+            {/* FILTER ORDER TYPE DIHAPUS */}
+            {/* <select
+              value={orderTypeFilter}
+              onChange={handleOrderTypeFilterChange}
+              className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+            >
+              <option value="all">Semua Jenis</option>
+              <option value="openbill">Open Bill</option>
+              <option value="closebill">Close Bill</option>
+            </select> */}
 
             <button
               onClick={resetToToday}
@@ -2091,7 +2630,7 @@ export default function OrdersPage() {
                               className="w-full px-4 py-2 text-left text-sm text-blue-600 hover:bg-blue-50 flex items-center space-x-2"
                             >
                               <Edit className="h-4 w-4" />
-                              <span>Detail</span>
+                              <span>Detail/Edit</span>
                             </button>
                             <button
                               onClick={() => printStruk(order)}
@@ -2127,10 +2666,11 @@ export default function OrdersPage() {
                         </div>
                       </div>
                       <div>
-                        <p className="text-gray-600">Pembayaran</p>
-                        <p className="text-gray-900 text-xs capitalize">
-                          {getPaymentMethodLabel(order.payment_method)}
-                        </p>
+                        <p className="text-gray-600">Jenis</p>
+                        <div className={`inline-flex items-center px-2 py-1 rounded-lg text-xs font-medium ${getOrderTypeColor(order.order_type)}`}>
+                          <span className="mr-1">{getOrderTypeIcon(order.order_type)}</span>
+                          <span>{order.order_type === 'openbill' ? 'Open Bill' : 'Close Bill'}</span>
+                        </div>
                       </div>
                       <div>
                         <p className="text-gray-600">Tanggal</p>
@@ -2202,6 +2742,7 @@ export default function OrdersPage() {
                   <th className="text-left py-4 px-4 text-sm font-semibold text-amber-900">Pelanggan</th>
                   <th className="text-left py-4 px-4 text-sm font-semibold text-amber-900">Total</th>
                   <th className="text-left py-4 px-4 text-sm font-semibold text-amber-900">Status</th>
+                  <th className="text-left py-4 px-4 text-sm font-semibold text-amber-900">Jenis</th>
                   <th className="text-left py-4 px-4 text-sm font-semibold text-amber-900">Pembayaran</th>
                   <th className="text-left py-4 px-4 text-sm font-semibold text-amber-900">Tanggal</th>
                   <th className="text-left py-4 px-4 text-sm font-semibold text-amber-900">Aksi</th>
@@ -2210,7 +2751,7 @@ export default function OrdersPage() {
               <tbody>
                 {showEmptyState() ? (
                   <tr>
-                    <td colSpan={8}>
+                    <td colSpan={9}>
                       {showEmptyState()}
                     </td>
                   </tr>
@@ -2255,6 +2796,12 @@ export default function OrdersPage() {
                           </div>
                         </td>
                         <td className="py-4 px-4">
+                          <div className={`inline-flex items-center px-2 py-1 rounded-lg text-xs font-medium ${getOrderTypeColor(order.order_type)}`}>
+                            <span className="mr-1">{getOrderTypeIcon(order.order_type)}</span>
+                            <span>{order.order_type === 'openbill' ? 'Open Bill' : 'Close Bill'}</span>
+                          </div>
+                        </td>
+                        <td className="py-4 px-4">
                           <div className="flex items-center space-x-2 text-sm text-gray-900 capitalize">
                             {getPaymentMethodIcon(order.payment_method)}
                             <span>{getPaymentMethodLabel(order.payment_method)}</span>
@@ -2281,7 +2828,7 @@ export default function OrdersPage() {
                             <button
                               onClick={() => openDetailModal(order)}
                               className="text-blue-600 hover:text-blue-800 p-1 transition-colors"
-                              title="Detail Order"
+                              title="Detail/Edit Order"
                             >
                               <Edit className="h-4 w-4" />
                             </button>
@@ -2308,7 +2855,7 @@ export default function OrdersPage() {
                       {/* Expanded Product Details for Desktop */}
                       {expandedRows.has(order.id) && (
                         <tr className="bg-gray-50 border-b border-amber-100">
-                          <td colSpan={8} className="py-4 px-4">
+                          <td colSpan={9} className="py-4 px-4">
                             <div className="max-w-4xl">
                               <h4 className="font-medium text-gray-900 mb-3 flex items-center">
                                 <Package className="h-4 w-4 mr-2 text-amber-600" />
@@ -2462,19 +3009,19 @@ export default function OrdersPage() {
               <div className="flex flex-wrap gap-4 text-sm text-gray-600">
                 <div className="flex items-center">
                   <div className="w-3 h-3 bg-yellow-500 rounded-full mr-2"></div>
-                  <span>Pending: {orders.filter(o => o.status === 'pending').length}</span>
+                  <span>Pending: {pendingCount}</span>
                 </div>
                 <div className="flex items-center">
                   <div className="w-3 h-3 bg-blue-500 rounded-full mr-2"></div>
-                  <span>Processing: {orders.filter(o => o.status === 'processing').length}</span>
+                  <span>Processing: {processingCount}</span>
                 </div>
                 <div className="flex items-center">
                   <div className="w-3 h-3 bg-green-500 rounded-full mr-2"></div>
-                  <span>Completed: {orders.filter(o => o.status === 'completed').length}</span>
+                  <span>Completed: {completedCount}</span>
                 </div>
                 <div className="flex items-center">
                   <div className="w-3 h-3 bg-red-500 rounded-full mr-2"></div>
-                  <span>Cancelled: {orders.filter(o => o.status === 'cancelled').length}</span>
+                  <span>Cancelled: {cancelledCount}</span>
                 </div>
               </div>
             </div>
@@ -2524,6 +3071,36 @@ export default function OrdersPage() {
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
                     placeholder="Opsional"
                   />
+                </div>
+              </div>
+
+              {/* Order Type */}
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-2 flex items-center">
+                  <ShoppingCart className="h-4 w-4 mr-2 text-amber-600" />
+                  Jenis Order
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  {ORDER_TYPES.map((type) => (
+                    <button
+                      key={type.value}
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, order_type: type.value }))}
+                      className={`p-3 rounded-lg border transition-all ${formData.order_type === type.value
+                        ? 'border-amber-500 bg-amber-50 text-amber-700'
+                        : 'border-gray-300 hover:border-amber-300 hover:bg-amber-50'
+                        }`}
+                    >
+                      <div className="flex items-center space-x-2">
+                        <div className="text-left">
+                          <p className="font-medium">{type.label}</p>
+                          <p className="text-xs text-gray-500">
+                            {type.value === 'openbill' ? 'Tidak langsung cetak struk' : 'Langsung cetak struk'}
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -2684,16 +3261,18 @@ export default function OrdersPage() {
         </div>
       )}
 
-      {/* Order Detail Modal */}
+      {/* Order Detail Modal dengan Form Update */}
       {showDetailModal && selectedOrder && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-gray-200 flex items-center justify-between">
               <div>
                 <h3 className="text-xl font-semibold text-gray-900">
-                  Detail Order
+                  Detail Order - {selectedOrder.order_number}
                 </h3>
-                <p className="text-sm text-gray-600 mt-1">{selectedOrder.order_number}</p>
+                <p className="text-sm text-gray-600 mt-1">
+                  Created: {new Date(selectedOrder.created_at).toLocaleString('id-ID')}
+                </p>
               </div>
               <button
                 onClick={closeModals}
@@ -2704,121 +3283,233 @@ export default function OrdersPage() {
             </div>
 
             <div className="p-6 space-y-6">
-              {/* Order Information */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* FORM UPDATE ORDER */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Customer Name */}
                 <div>
-                  <h4 className="font-medium text-gray-900 mb-3 flex items-center">
-                    <User className="h-4 w-4 mr-2 text-amber-600" />
-                    Informasi Pelanggan
-                  </h4>
-                  <div className="space-y-2">
-                    <div>
-                      <p className="text-xs text-gray-600">Nama</p>
-                      <p className="text-sm text-gray-900">
-                        {selectedOrder.customer_name || 'Walk-in Customer'}
-                      </p>
-                    </div>
-                    {selectedOrder.customer_phone && (
-                      <div>
-                        <p className="text-xs text-gray-600">No. Telepon</p>
-                        <p className="text-sm text-gray-900">{selectedOrder.customer_phone}</p>
-                      </div>
-                    )}
-                    <div>
-                      <p className="text-xs text-gray-600">Tanggal Order</p>
-                      <p className="text-sm text-gray-900">
-                        {new Date(selectedOrder.created_at).toLocaleString('id-ID')}
-                      </p>
-                    </div>
-                  </div>
+                  <label className="text-sm font-medium text-gray-700 mb-2 block">
+                    Nama Pelanggan
+                  </label>
+                  <input
+                    type="text"
+                    value={updateForm.customer_name}
+                    onChange={(e) => setUpdateForm(prev => ({
+                      ...prev,
+                      customer_name: e.target.value
+                    }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    placeholder="Nama pelanggan"
+                  />
                 </div>
 
+                {/* Customer Phone */}
                 <div>
-                  <h4 className="font-medium text-gray-900 mb-3 flex items-center">
-                    <CreditCard className="h-4 w-4 mr-2 text-amber-600" />
-                    Informasi Pembayaran
-                  </h4>
-                  <div className="space-y-2">
-                    <div>
-                      <p className="text-xs text-gray-600">Total Amount</p>
-                      <p className="text-lg font-semibold text-gray-900">
-                        {formatCurrency(selectedOrder.total_amount)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-600">Metode Pembayaran</p>
-                      <p className="text-sm text-gray-900 capitalize">
-                        {getPaymentMethodLabel(selectedOrder.payment_method)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-600">Status</p>
-                      <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(selectedOrder.status)}`}>
-                        {getStatusIcon(selectedOrder.status)}
-                        <span className="ml-1 capitalize">{selectedOrder.status}</span>
-                      </div>
-                    </div>
-                  </div>
+                  <label className="text-sm font-medium text-gray-700 mb-2 block">
+                    No. Telepon
+                  </label>
+                  <input
+                    type="tel"
+                    value={updateForm.customer_phone}
+                    onChange={(e) => setUpdateForm(prev => ({
+                      ...prev,
+                      customer_phone: e.target.value
+                    }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    placeholder="No. telepon"
+                  />
                 </div>
-              </div>
 
-              {/* Order Items */}
-              <div>
-                <h4 className="font-medium text-gray-900 mb-3 flex items-center">
-                  <Package className="h-4 w-4 mr-2 text-amber-600" />
-                  Detail Produk yang Dipesan ({selectedOrder.order_items?.length || 0} item)
-                </h4>
-                <div className="space-y-2">
-                  {selectedOrder.order_items && selectedOrder.order_items.length > 0 ? (
-                    selectedOrder.order_items.map((item) => (
-                      <div key={item.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg border border-gray-200">
-                        <div className="flex-1">
-                          <p className="font-medium text-gray-900">
-                            {item.products?.name || 'Nama produk tidak tersedia'}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-semibold text-gray-900">
-                            x {item.quantity}
-                          </p>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-center py-4 text-gray-500 text-sm">
-                      Tidak ada produk
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Notes */}
-              {selectedOrder.notes && (
+                {/* Payment Method */}
                 <div>
-                  <h4 className="font-medium text-gray-900 mb-2 flex items-center">
-                    <FileText className="h-4 w-4 mr-2 text-amber-600" />
+                  <label className="text-sm font-medium text-gray-700 mb-2 block">
+                    Metode Pembayaran
+                  </label>
+                  <select
+                    value={updateForm.payment_method}
+                    onChange={(e) => setUpdateForm(prev => ({
+                      ...prev,
+                      payment_method: e.target.value
+                    }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  >
+                    {PAYMENT_METHODS.map(method => (
+                      <option key={method.value} value={method.value}>
+                        {method.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Status */}
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-2 block">
+                    Status
+                  </label>
+                  <select
+                    value={updateForm.status}
+                    onChange={(e) => setUpdateForm(prev => ({
+                      ...prev,
+                      status: e.target.value as Order['status']
+                    }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  >
+                    <option value="pending">Pending</option>
+                    <option value="processing">Processing</option>
+                    <option value="completed">Completed</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                </div>
+
+                {/* Order Type */}
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-2 block">
+                    Jenis Order
+                  </label>
+                  <select
+                    value={updateForm.order_type}
+                    onChange={(e) => setUpdateForm(prev => ({
+                      ...prev,
+                      order_type: e.target.value as 'openbill' | 'closebill'
+                    }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  >
+                    <option value="openbill">Open Bill</option>
+                    <option value="closebill">Close Bill</option>
+                  </select>
+                </div>
+
+                {/* Notes */}
+                <div className="md:col-span-2">
+                  <label className="text-sm font-medium text-gray-700 mb-2 block">
                     Catatan
-                  </h4>
-                  <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                    {selectedOrder.notes}
-                  </p>
+                  </label>
+                  <textarea
+                    value={updateForm.notes}
+                    onChange={(e) => setUpdateForm(prev => ({
+                      ...prev,
+                      notes: e.target.value
+                    }))}
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    placeholder="Catatan untuk order"
+                  />
                 </div>
-              )}
+              </div>
 
-              {/* Summary */}
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-lg font-semibold text-amber-900">Total Amount</span>
-                  <span className="text-2xl font-bold text-amber-900">
-                    {formatCurrency(selectedOrder.total_amount)}
-                  </span>
+              {/* ORDER ITEMS SECTION - DIPERBAIKI */}
+              <div className="border-t border-gray-200 pt-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className="text-lg font-medium text-gray-900 flex items-center">
+                    <Package className="h-5 w-5 mr-2 text-amber-600" />
+                    Produk ({updateForm.items.length} item)
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={addItemToUpdateForm}
+                    className="text-amber-600 hover:text-amber-700 text-sm font-medium flex items-center space-x-1"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span>Tambah Produk</span>
+                  </button>
                 </div>
-                <div className="mt-2 text-xs text-amber-700">
-                  Dibuat pada {new Date(selectedOrder.created_at).toLocaleString('id-ID')}
+
+                <div className="space-y-3">
+                  {updateForm.items.map((item, index) => (
+                    <div key={index} className="flex items-center gap-3 p-4 border border-gray-200 rounded-lg bg-white">
+                      {/* Product Selection */}
+                      <div className="flex-1">
+                        <select
+                          value={item.product_id}
+                          onChange={(e) => updateItemInUpdateForm(index, 'product_id', e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 text-sm"
+                        >
+                          <option value="">Pilih Produk</option>
+                          {products.map(product => (
+                            <option key={product.id} value={product.id}>
+                              {product.name} - Rp {product.price.toLocaleString('id-ID')}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Quantity Control */}
+                      <div className="flex items-center space-x-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newQty = Math.max(1, item.quantity - 1)
+                            updateItemInUpdateForm(index, 'quantity', newQty)
+                          }}
+                          className="w-8 h-8 flex items-center justify-center rounded border border-gray-300 hover:bg-gray-100 transition-colors"
+                        >
+                          <Minus className="h-3 w-3" />
+                        </button>
+
+                        <span className="text-sm font-medium w-8 text-center">
+                          {item.quantity}
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            updateItemInUpdateForm(index, 'quantity', item.quantity + 1)
+                          }}
+                          className="w-8 h-8 flex items-center justify-center rounded border border-gray-300 hover:bg-gray-100 transition-colors"
+                        >
+                          <Plus className="h-3 w-3" />
+                        </button>
+                      </div>
+
+                      {/* Price Display */}
+                      <div className="text-right">
+                        <div className="text-sm font-medium text-gray-900">
+                          Rp {(item.price * item.quantity).toLocaleString('id-ID')}
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          @ Rp {item.price.toLocaleString('id-ID')}
+                        </div>
+                      </div>
+
+                      {/* Remove Button */}
+                      <button
+                        type="button"
+                        onClick={() => removeItemFromUpdateForm(index)}
+                        className="text-red-500 hover:text-red-700 p-1 transition-colors"
+                        disabled={updateForm.items.length <= 1}
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {updateForm.items.length === 0 && (
+                  <div className="text-center py-8 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50">
+                    <Package className="h-12 w-12 text-gray-300 mx-auto mb-2" />
+                    <p className="text-gray-500">Belum ada produk dalam order ini</p>
+                  </div>
+                )}
+
+                {/* Total Section */}
+                <div className="mt-6 bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <div className="flex justify-between items-center">
+                    <span className="text-lg font-semibold text-amber-900">Total Amount</span>
+                    <span className="text-2xl font-bold text-amber-900">
+                      Rp {updateFormTotal.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                  <div className="text-sm text-gray-600 mt-1">
+                    {selectedOrder.total_amount !== updateFormTotal && (
+                      <span className="text-red-600">
+                        Perubahan: {formatCurrency(selectedOrder.total_amount)} → {formatCurrency(updateFormTotal)}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
 
+            {/* Action Buttons */}
             <div className="p-6 border-t border-gray-200 flex flex-col sm:flex-row justify-between gap-3">
               <div className="flex gap-2">
                 <button
@@ -2828,28 +3519,71 @@ export default function OrdersPage() {
                   <Printer className="h-4 w-4" />
                   <span>Cetak Struk</span>
                 </button>
-                {bluetoothPrinter && (
-                  <button
-                    onClick={() => updateOrderStatus(selectedOrder.id, 'completed')}
-                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2"
-                  >
-                    <CheckCircle className="h-4 w-4" />
-                    <span>Mark as Completed</span>
-                  </button>
-                )}
+                <button
+                  onClick={() => {
+                    // Reset form ke data asli
+                    const formattedItems = selectedOrder.order_items?.map(item => ({
+                      id: item.id,
+                      product_id: item.product_id,
+                      quantity: item.quantity,
+                      price: item.price,
+                      product_name: item.products?.name,
+                      subtotal: item.price * item.quantity
+                    })) || []
+
+                    setUpdateForm({
+                      customer_name: selectedOrder.customer_name || '',
+                      customer_phone: selectedOrder.customer_phone || '',
+                      payment_method: selectedOrder.payment_method || 'cash',
+                      notes: selectedOrder.notes || '',
+                      status: selectedOrder.status,
+                      order_type: selectedOrder.order_type || 'openbill',
+                      items: formattedItems
+                    })
+
+                    showAlert(
+                      'Form Reset',
+                      'Form telah direset ke nilai awal',
+                      'info'
+                    )
+                  }}
+                  className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors flex items-center space-x-2"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  <span>Reset</span>
+                </button>
               </div>
-              <button
-                onClick={closeModals}
-                className="px-6 py-3 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
-              >
-                Tutup
-              </button>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={closeModals}
+                  className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={updateOrderItems}
+                  disabled={isUpdating || updateForm.items.length === 0}
+                  className="px-6 py-3 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 flex items-center space-x-2"
+                >
+                  {isUpdating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Menyimpan...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-4 w-4" />
+                      <span>Simpan Perubahan</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Printer Configuration Modal */}
       {showPrinterConfig && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
