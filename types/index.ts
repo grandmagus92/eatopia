@@ -76,7 +76,7 @@ export interface Order {
   updated_at: string
   completed_at: string | null // Tambahkan ini
   order_items: OrderItem[]
-  order_type?: string;
+  order_type: 'closebill' | 'openbill'
 }
 
 export interface ReportData {
