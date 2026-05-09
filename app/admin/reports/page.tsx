@@ -166,7 +166,7 @@ export default function ReportsPage() {
     const categorySalesMap = new Map()
 
     // Define drink categories (minuman)
-    const drinkCategories = ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic', 'Mocktail', 'Non-Coffe']
+    const drinkCategories = ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic Coffee', 'Mocktail', 'Non-Coffee']
 
     orders?.forEach((order: any) => {
       order.order_items?.forEach((item: any) => {
@@ -479,7 +479,7 @@ export default function ReportsPage() {
   // Fungsi untuk menentukan unit berdasarkan kategori
   const getQuantityUnit = (category: string) => {
     const snackCategories = ['Snacks', 'Food'];
-    const drinkCategories = ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic', 'Mocktail', 'Non-Coffe'];
+    const drinkCategories = ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic Coffee', 'Mocktail', 'Non-Coffee'];
 
     if (snackCategories.includes(category)) {
       return 'pcs';
@@ -914,7 +914,7 @@ export default function ReportsPage() {
               <tbody>
                 ${categorySales.map((category, index) => {
         const isSnack = category.category === 'Snacks';
-        const isDrink = ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic', 'Mocktail', 'Non-Coffe'].includes(category.category);
+        const isDrink = ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic', 'Mocktail', 'Non-Coffee'].includes(category.category);
         const type = isSnack ? 'Snack' : isDrink ? 'Minuman' : 'Lainnya';
 
         return `
@@ -1040,9 +1040,9 @@ export default function ReportsPage() {
     'This Week': () => {
       const today = getJakartaDate();
       const firstDay = new Date(today);
-      firstDay.setDate(today.getDate() - today.getDay()); // Minggu
+      firstDay.setDate(today.getDate() - today.getDay()- 6); // Minggu
       const lastDay = new Date(today);
-      lastDay.setDate(today.getDate() - today.getDay() + 6); // Sabtu
+      lastDay.setDate(today.getDate() - today.getDay() ); // Sabtu
 
       return {
         start: formatDateForInput(firstDay),
@@ -1681,7 +1681,7 @@ export default function ReportsPage() {
                           </td>
                           <td className="py-2 sm:py-3 font-medium text-xs sm:text-sm truncate max-w-[120px] sm:max-w-none">
                             <div className="flex items-center">
-                              {getCategoryIcon(product.category)}
+                              
                               <span title={product.product_name}>
                                 {product.product_name}
                               </span>
@@ -1690,7 +1690,7 @@ export default function ReportsPage() {
                           <td className="py-2 sm:py-3 text-xs sm:text-sm">
                             <span className={`px-2 py-1 rounded-full text-xs ${product.category === 'Snacks' || product.category === 'Food'
                                 ? 'bg-orange-100 text-orange-800'
-                                : ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic', 'Mocktail', 'Non-Coffe'].includes(product.category)
+                                : ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic Coffee', 'Mocktail', 'Non-Coffee'].includes(product.category)
                                   ? 'bg-blue-100 text-blue-800'
                                   : 'bg-gray-100 text-gray-800'
                               }`}>
@@ -1704,7 +1704,7 @@ export default function ReportsPage() {
                               </span>
                               {product.category === 'Snacks' || product.category === 'Food' ? (
                                 <Package className="h-3 w-3 ml-1 text-orange-500" />
-                              ) : ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic', 'Mocktail', 'Non-Coffe'].includes(product.category) ? (
+                              ) : ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic Coffee', 'Mocktail', 'Non-Coffee'].includes(product.category) ? (
                                 <Coffee className="h-3 w-3 ml-1 text-blue-500" />
                               ) : null}
                             </div>
@@ -1795,14 +1795,14 @@ export default function ReportsPage() {
                     <tbody>
                       {categorySales.map((category: CategorySales, index: number) => {
                         const isSnack = category.category === 'Snacks';
-                        const isDrink = ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic', 'Mocktail', 'Non-Coffe'].includes(category.category);
+                        const isDrink = ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic Coffee', 'Mocktail', 'Non-Coffee'].includes(category.category);
                         const type = isSnack ? 'Snack' : isDrink ? 'Drink' : 'Other';
 
                         return (
                           <tr key={index} className="border-b hover:bg-gray-50">
                             <td className="py-2 sm:py-3 text-xs sm:text-sm">
                               <div className="flex items-center">
-                                {getCategoryIcon(category.category)}
+                              
                                 {category.category}
                               </div>
                             </td>
