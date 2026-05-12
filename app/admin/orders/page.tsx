@@ -675,15 +675,15 @@ export default function OrdersPage() {
       const from = (currentPage - 1) * itemsPerPage
       const to = from + itemsPerPage - 1
 
-      let query = supabase
-        .from('orders')
-        .select(`
-          *,
-          order_items(
-            *,
-            products(*)
-          )
-        `, { count: 'exact' })
+     let query = supabase
+  .from('orders')
+  .select(`
+    *,
+    order_items(
+      *,
+      products:product_id(*)
+    )
+  `, { count: 'exact' })
         .order('created_at', { ascending: false })
         .range(from, to)
 
