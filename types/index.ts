@@ -10,6 +10,19 @@ export interface Product {
   updated_at: string
 }
 
+export interface Order {
+  id: string
+  order_number: string
+  total_amount: number
+  status: 'pending' | 'processing' | 'completed' | 'cancelled'
+  payment_method: string // Ubah menjadi string saja
+  customer_name?: string
+  customer_phone?: string
+  notes?: string
+  created_at: string
+  items?: OrderItem[]
+}
+
 export interface OrderItem {
   id: string
   order_id: string
@@ -36,14 +49,7 @@ export interface CreateOrderData {
 }
 
 
-export interface ReportData {
-  period: string
-  revenue: number
-  orders: number
-  averageOrderValue: number
-  bestSellingProduct: string
-  bestSellingCategory: string
-}
+
 
 export interface PieDataItem {
   name: string;
@@ -127,3 +133,4 @@ export interface SalesData {
   orders: number
   customers?: number
 }
+
