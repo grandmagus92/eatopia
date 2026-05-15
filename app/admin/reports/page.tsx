@@ -1,4 +1,5 @@
 'use client'
+
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { ReportData, ProductSales, CategorySales, TimeSeriesData, PieDataItem } from '@/types'
@@ -111,121 +112,147 @@ export default function ReportsPage() {
     setCurrentPage(1)
   }, [productSales])
 
-  const generateReports = async () => {
-    setLoading(true)
-    try {
-      await Promise.all([
-        fetchSummaryReport(),
-        fetchProductSales(),
-        fetchCategorySales(),
-        fetchTimeSeriesData()
-      ])
-    } catch (error) {
-      console.error('Error generating reports:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
+  // ========== FUNGSI FETCH DENGAN PAGINATION ==========
+  
+  // Fungsi untuk fetch semua orders dengan pagination (tanpa limit)
+  const fetchAllOrdersWithPagination = async () => {
+    let allOrders: any[] = [];
+    let page = 0;
+    const pageSize = 1000; // Ambil 1000 data per request (max Supabase)
+    let hasMore = true;
 
-  // ─── FETCH SUMMARY REPORT ────────────────────────────────────────────────────
-  const fetchSummaryReport = async () => {
-    try {
-      // Hitung total revenue dari tabel orders berdasarkan startDate dan endDate
-      const { data: revenueData, error: revenueError } = await supabase
-        .from('orders')
-        .select('total_amount')
-        .gte('created_at', `${startDate}T00:00:00`)
-        .lte('created_at', `${endDate}T23:59:59`);
+    console.log(`Mulai fetch orders dari ${startDate} sampai ${endDate}`);
 
-      if (revenueError) {
-        console.error('Error fetching revenue:', revenueError);
-        return;
-      }
-
-      const totalRevenue = revenueData?.reduce(
-        (sum: number, item: any) => sum + Number(item.total_amount || 0),
-        0
-      ) || 0;
-
-      // Fetch orders dengan order_items untuk data lainnya
-      const { data: orders, error } = await supabase
+    while (hasMore) {
+      const { data, error } = await supabase
         .from('orders')
         .select(`
+          id,
           total_amount,
-          order_items(
+          created_at,
+          order_items (
             quantity,
             price,
             subtotal,
-            products(name, category)
+            products (
+              name,
+              category
+            )
           )
         `)
         .gte('created_at', `${startDate}T00:00:00`)
         .lte('created_at', `${endDate}T23:59:59`)
+        .range(page * pageSize, (page + 1) * pageSize - 1);
 
       if (error) {
-        console.error('Error fetching orders:', error)
-        return
+        console.error('Error fetching orders:', error);
+        break;
       }
 
-      const totalOrders = orders?.length || 0
-      const averageOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0
+      if (data && data.length > 0) {
+        allOrders = [...allOrders, ...data];
+        console.log(`Mengambil ${data.length} orders (total: ${allOrders.length})`);
+        page++;
+        
+        // Jika data yang diterima kurang dari pageSize, berarti sudah selesai
+        if (data.length < pageSize) {
+          hasMore = false;
+        }
+      } else {
+        hasMore = false;
+      }
+    }
 
-      let totalCups = 0
-      let totalSnack = 0
-      const productSalesMap = new Map()
-      const categorySalesMap = new Map()
+    console.log(`Selesai fetch orders. Total: ${allOrders.length} orders`);
+    return allOrders;
+  };
 
-      const drinkCategories = ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic Coffee', 'Mocktail', 'Non-Coffee']
+  // Fungsi untuk fetch summary report
+  const fetchSummaryReport = async (orders: any[]) => {
+    try {
+      if (orders.length === 0) {
+        setReportData({
+          period: `${startDate} to ${endDate}`,
+          revenue: 0,
+          orders: 0,
+          averageOrderValue: 0,
+          bestSellingProduct: '-',
+          bestSellingCategory: '-',
+          totalCups: 0,
+          totalSnack: 0,
+          bestSellingProductQuantity: 0,
+          bestSellingCategoryQuantity: 0,
+          uniqueProductsSold: 0
+        });
+        return;
+      }
 
-      orders?.forEach((order: any) => {
-        order.order_items?.forEach((item: any) => {
-          const category = item.products?.category || 'Unknown'
+      const totalRevenue = orders.reduce(
+        (sum: number, order: any) => sum + Number(order.total_amount || 0),
+        0
+      );
+      
+      const totalOrders = orders.length;
+      const averageOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
 
-          if (drinkCategories.includes(category)) {
-            totalCups += item.quantity
-          } else if (category === 'Snacks') {
-            totalSnack += item.quantity
-          }
+      let totalCups = 0;
+      let totalSnack = 0;
+      const productSalesMap = new Map();
+      const categorySalesMap = new Map();
 
-          const productName = item.products?.name || 'Unknown'
-          const currentProduct = productSalesMap.get(productName) || { quantity: 0, revenue: 0 }
-          productSalesMap.set(productName, {
-            quantity: currentProduct.quantity + item.quantity,
-            revenue: currentProduct.revenue + item.subtotal
-          })
+      const drinkCategories = ['Hot Coffee', 'Cold Coffee', 'Specialty', 'Basic Coffee', 'Mocktail', 'Non-Coffee'];
 
-          const categoryKey = item.products?.category || 'Unknown'
-          const currentCategory = categorySalesMap.get(categoryKey) || { quantity: 0, revenue: 0 }
-          categorySalesMap.set(categoryKey, {
-            quantity: currentCategory.quantity + item.quantity,
-            revenue: currentCategory.revenue + item.subtotal
-          })
-        })
-      })
+      orders.forEach((order: any) => {
+        if (order.order_items) {
+          order.order_items.forEach((item: any) => {
+            const category = item.products?.category || 'Unknown';
 
-      let bestSellingProduct = '-'
-      let bestSellingProductQuantity = 0
-      let maxQuantity = 0
+            if (drinkCategories.includes(category)) {
+              totalCups += item.quantity;
+            } else if (category === 'Snacks') {
+              totalSnack += item.quantity;
+            }
+
+            const productName = item.products?.name || 'Unknown';
+            const currentProduct = productSalesMap.get(productName) || { quantity: 0, revenue: 0 };
+            productSalesMap.set(productName, {
+              quantity: currentProduct.quantity + item.quantity,
+              revenue: currentProduct.revenue + item.subtotal
+            });
+
+            const categoryKey = category;
+            const currentCategory = categorySalesMap.get(categoryKey) || { quantity: 0, revenue: 0 };
+            categorySalesMap.set(categoryKey, {
+              quantity: currentCategory.quantity + item.quantity,
+              revenue: currentCategory.revenue + item.subtotal
+            });
+          });
+        }
+      });
+
+      let bestSellingProduct = '-';
+      let bestSellingProductQuantity = 0;
+      let maxQuantity = 0;
       productSalesMap.forEach((value, key) => {
         if (value.quantity > maxQuantity) {
-          maxQuantity = value.quantity
-          bestSellingProduct = key
-          bestSellingProductQuantity = value.quantity
+          maxQuantity = value.quantity;
+          bestSellingProduct = key;
+          bestSellingProductQuantity = value.quantity;
         }
-      })
+      });
 
-      let bestSellingCategory = '-'
-      let bestSellingCategoryQuantity = 0
-      let maxCategoryRevenue = 0
+      let bestSellingCategory = '-';
+      let bestSellingCategoryQuantity = 0;
+      let maxCategoryRevenue = 0;
       categorySalesMap.forEach((value, key) => {
         if (value.revenue > maxCategoryRevenue) {
-          maxCategoryRevenue = value.revenue
-          bestSellingCategory = key
-          bestSellingCategoryQuantity = value.quantity
+          maxCategoryRevenue = value.revenue;
+          bestSellingCategory = key;
+          bestSellingCategoryQuantity = value.quantity;
         }
-      })
+      });
 
-      const uniqueProductsSold = productSalesMap.size
+      const uniqueProductsSold = productSalesMap.size;
 
       setReportData({
         period: `${startDate} to ${endDate}`,
@@ -239,199 +266,166 @@ export default function ReportsPage() {
         bestSellingProductQuantity,
         bestSellingCategoryQuantity,
         uniqueProductsSold
-      })
+      });
     } catch (err) {
-      console.error('Error in fetchSummaryReport:', err)
+      console.error('Error in fetchSummaryReport:', err);
     }
-  }
+  };
 
-  // ─── FETCH PRODUCT SALES (filter via order_id) ────────────────────────
-  const fetchProductSales = async () => {
-    // Step 1: ambil order IDs yang sesuai rentang tanggal
-    const { data: orders, error: orderError } = await supabase
-      .from('orders')
-      .select('id')
-      .gte('created_at', `${startDate}T00:00:00`)
-      .lte('created_at', `${endDate}T23:59:59`)
-
-    if (orderError) {
-      console.error('Error fetching orders for product sales:', orderError)
-      return
-    }
-
-    if (!orders?.length) {
-      setProductSales([])
-      setPieChartData([])
-      return
-    }
-
-    const orderIds = orders.map((o: any) => o.id)
-
-    // Step 2: ambil order_items hanya dari order yang sesuai tanggal
-    const { data, error } = await supabase
-      .from('order_items')
-      .select(`
-        quantity,
-        price,
-        subtotal,
-        products(name, category)
-      `)
-      .in('order_id', orderIds)
-
-    if (error) {
-      console.error('Error fetching product sales:', error)
-      return
-    }
-
-    const productMap = new Map()
-
-    data?.forEach((item: any) => {
-      const productName = item.products?.name || 'Unknown'
-      const category = item.products?.category || 'Unknown'
-      const current = productMap.get(productName) || {
-        product_name: productName,
-        category: category,
-        quantity_sold: 0,
-        total_revenue: 0,
-        average_price: 0
+  // Fungsi untuk fetch product sales
+  const fetchProductSales = async (orders: any[]) => {
+    try {
+      if (orders.length === 0) {
+        setProductSales([]);
+        setPieChartData([]);
+        return;
       }
 
-      productMap.set(productName, {
-        ...current,
-        quantity_sold: current.quantity_sold + item.quantity,
-        total_revenue: current.total_revenue + item.subtotal,
-        average_price: (current.total_revenue + item.subtotal) / (current.quantity_sold + item.quantity)
-      })
-    })
+      const productMap = new Map();
 
-    const sortedProducts = Array.from(productMap.values())
-      .sort((a: any, b: any) => b.total_revenue - a.total_revenue)
+      orders.forEach((order: any) => {
+        if (order.order_items) {
+          order.order_items.forEach((item: any) => {
+            const productName = item.products?.name || 'Unknown';
+            const category = item.products?.category || 'Unknown';
+            const current = productMap.get(productName) || {
+              product_name: productName,
+              category: category,
+              quantity_sold: 0,
+              total_revenue: 0,
+              average_price: 0
+            };
 
-    setProductSales(sortedProducts)
+            const newQuantity = current.quantity_sold + item.quantity;
+            const newRevenue = current.total_revenue + item.subtotal;
+            
+            productMap.set(productName, {
+              ...current,
+              quantity_sold: newQuantity,
+              total_revenue: newRevenue,
+              average_price: newRevenue / newQuantity
+            });
+          });
+        }
+      });
 
-    // Generate Pie Chart Data dari product sales (top 8 produk)
-    const pieData: PieDataItem[] = sortedProducts.slice(0, 8).map((product: any) => ({
-      name: product.product_name,
-      value: product.total_revenue,
-      quantity: product.quantity_sold
-    }))
-    setPieChartData(pieData)
-  }
+      const sortedProducts = Array.from(productMap.values())
+        .sort((a: any, b: any) => b.total_revenue - a.total_revenue);
 
-  // ─── FETCH CATEGORY SALES (filter via order_id) ───────────────────────
-  const fetchCategorySales = async () => {
-    // Step 1: ambil order IDs yang sesuai rentang tanggal
-    const { data: orders, error: orderError } = await supabase
-      .from('orders')
-      .select('id')
-      .gte('created_at', `${startDate}T00:00:00`)
-      .lte('created_at', `${endDate}T23:59:59`)
+      setProductSales(sortedProducts);
 
-    if (orderError) {
-      console.error('Error fetching orders for category sales:', orderError)
-      return
+      // Generate Pie Chart Data dari product sales (top 8 produk)
+      const pieData: PieDataItem[] = sortedProducts.slice(0, 8).map((product: any) => ({
+        name: product.product_name,
+        value: product.total_revenue,
+        quantity: product.quantity_sold
+      }));
+      setPieChartData(pieData);
+    } catch (err) {
+      console.error('Error in fetchProductSales:', err);
     }
+  };
 
-    if (!orders?.length) {
-      setCategorySales([])
-      return
-    }
-
-    const orderIds = orders.map((o: any) => o.id)
-
-    // Step 2: ambil order_items hanya dari order yang sesuai tanggal
-    const { data, error } = await supabase
-      .from('order_items')
-      .select(`
-        quantity,
-        subtotal,
-        products(category)
-      `)
-      .in('order_id', orderIds)
-
-    if (error) {
-      console.error('Error fetching category sales:', error)
-      return
-    }
-
-    const categoryMap = new Map()
-    let totalRevenue = 0
-
-    data?.forEach((item: any) => {
-      const category = item.products?.category || 'Unknown'
-      const current = categoryMap.get(category) || {
-        category: category,
-        quantity_sold: 0,
-        total_revenue: 0
+  // Fungsi untuk fetch category sales
+  const fetchCategorySales = async (orders: any[]) => {
+    try {
+      if (orders.length === 0) {
+        setCategorySales([]);
+        return;
       }
 
-      categoryMap.set(category, {
-        ...current,
-        quantity_sold: current.quantity_sold + item.quantity,
-        total_revenue: current.total_revenue + item.subtotal
-      })
+      const categoryMap = new Map();
+      let totalRevenue = 0;
 
-      totalRevenue += item.subtotal
-    })
+      orders.forEach((order: any) => {
+        if (order.order_items) {
+          order.order_items.forEach((item: any) => {
+            const category = item.products?.category || 'Unknown';
+            const current = categoryMap.get(category) || {
+              category: category,
+              quantity_sold: 0,
+              total_revenue: 0
+            };
 
-    const categories = Array.from(categoryMap.values()).map((cat: any) => ({
-      ...cat,
-      percentage: totalRevenue > 0 ? (cat.total_revenue / totalRevenue) * 100 : 0
-    })).sort((a: any, b: any) => b.total_revenue - a.total_revenue)
+            categoryMap.set(category, {
+              ...current,
+              quantity_sold: current.quantity_sold + item.quantity,
+              total_revenue: current.total_revenue + item.subtotal
+            });
 
-    setCategorySales(categories)
-  }
+            totalRevenue += item.subtotal;
+          });
+        }
+      });
 
-  // ─── FETCH TIME SERIES DATA (grouped by day) ────────────────────────────
-  const fetchTimeSeriesData = async () => {
-    const { data: orders, error } = await supabase
-      .from('orders')
-      .select(`
-        created_at,
-        total_amount,
-        order_items(
-          quantity
-        )
-      `)
-      .gte('created_at', `${startDate}T00:00:00`)
-      .lte('created_at', `${endDate}T23:59:59`)
-      .order('created_at', { ascending: true })
+      const categories = Array.from(categoryMap.values()).map((cat: any) => ({
+        ...cat,
+        percentage: totalRevenue > 0 ? (cat.total_revenue / totalRevenue) * 100 : 0
+      })).sort((a: any, b: any) => b.total_revenue - a.total_revenue);
 
-    if (error) {
-      console.error('Error fetching time series data:', error)
-      return
+      setCategorySales(categories);
+    } catch (err) {
+      console.error('Error in fetchCategorySales:', err);
     }
+  };
 
-    const timeSeriesMap = new Map()
+  // Fungsi untuk fetch time series data
+  const fetchTimeSeriesData = async (orders: any[]) => {
+    try {
+      const timeSeriesMap = new Map();
 
-    orders?.forEach((order: any) => {
-      const date = new Date(order.created_at)
-      const key = date.toLocaleDateString('id-ID', {
-        day: 'numeric',
-        month: 'short',
-        timeZone: 'Asia/Jakarta'
-      })
+      orders.forEach((order: any) => {
+        const date = new Date(order.created_at);
+        const key = date.toLocaleDateString('id-ID', {
+          day: 'numeric',
+          month: 'short',
+          timeZone: 'Asia/Jakarta'
+        });
 
-      const totalQuantity = order.order_items?.reduce((sum: number, item: any) => sum + item.quantity, 0) || 0
+        const totalQuantity = order.order_items?.reduce((sum: number, item: any) => sum + item.quantity, 0) || 0;
 
-      const current = timeSeriesMap.get(key) || {
-        date: key,
-        revenue: 0,
-        orders: 0,
-        quantity: 0
-      }
+        const current = timeSeriesMap.get(key) || {
+          date: key,
+          revenue: 0,
+          orders: 0,
+          quantity: 0
+        };
 
-      timeSeriesMap.set(key, {
-        date: key,
-        revenue: current.revenue + (order.total_amount || 0),
-        orders: current.orders + 1,
-        quantity: current.quantity + totalQuantity
-      })
-    })
+        timeSeriesMap.set(key, {
+          date: key,
+          revenue: current.revenue + (order.total_amount || 0),
+          orders: current.orders + 1,
+          quantity: current.quantity + totalQuantity
+        });
+      });
 
-    const timeSeriesArray = Array.from(timeSeriesMap.values())
-    setTimeSeriesData(timeSeriesArray)
-  }
+      const timeSeriesArray = Array.from(timeSeriesMap.values());
+      setTimeSeriesData(timeSeriesArray);
+    } catch (err) {
+      console.error('Error in fetchTimeSeriesData:', err);
+    }
+  };
+
+  // Main function untuk generate semua laporan
+  const generateReports = async () => {
+    setLoading(true);
+    try {
+      // Fetch semua orders sekali dengan pagination
+      const allOrders = await fetchAllOrdersWithPagination();
+      
+      // Proses semua laporan berdasarkan data orders yang sudah di-fetch
+      await Promise.all([
+        fetchSummaryReport(allOrders),
+        fetchProductSales(allOrders),
+        fetchCategorySales(allOrders),
+        fetchTimeSeriesData(allOrders)
+      ]);
+    } catch (error) {
+      console.error('Error generating reports:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // ─── PAGINATION ───────────────────────────────────────────────────────────────
   const indexOfLastItem = currentPage * itemsPerPage
@@ -1231,7 +1225,7 @@ export default function ReportsPage() {
                           <td className="py-2 sm:py-3 text-xs sm:text-sm">{indexOfFirstItem + index + 1}</td>
                           <td className="py-2 sm:py-3 font-medium text-xs sm:text-sm truncate max-w-[120px] sm:max-w-none">
                             <span title={product.product_name}>{product.product_name}</span>
-                          </td>
+                           </td>
                           <td className="py-2 sm:py-3 text-xs sm:text-sm">
                             <span className={`px-2 py-1 rounded-full text-xs ${
                               product.category === 'Snacks' || product.category === 'Food'
@@ -1242,7 +1236,7 @@ export default function ReportsPage() {
                             }`}>
                               {product.category}
                             </span>
-                          </td>
+                           </td>
                           <td className="py-2 sm:py-3 text-xs sm:text-sm">
                             <div className="flex items-center">
                               <span className="font-medium">{formatQuantity(product.quantity_sold, product.category)}</span>
@@ -1252,10 +1246,10 @@ export default function ReportsPage() {
                                 <Coffee className="h-3 w-3 ml-1 text-blue-500" />
                               ) : null}
                             </div>
-                           </td>
+                            </td>
                           <td className="py-2 sm:py-3 text-xs sm:text-sm font-medium text-green-700">
                             Rp {product.total_revenue.toLocaleString('id-ID')}
-                           </td>
+                            </td>
                          </tr>
                       ))}
                     </tbody>
@@ -1265,22 +1259,22 @@ export default function ReportsPage() {
                           <td colSpan={3} className="py-2 sm:py-3 text-xs sm:text-sm">TOTAL (Page {currentPage})</td>
                           <td className="py-2 sm:py-3 text-xs sm:text-sm">
                             {currentProductSales.reduce((sum, product) => sum + product.quantity_sold, 0)} items
-                          </td>
+                           </td>
                           <td className="py-2 sm:py-3 text-xs sm:text-sm text-green-700">
                             Rp {currentProductSales.reduce((sum, product) => sum + product.total_revenue, 0).toLocaleString('id-ID')}
-                          </td>
-                        </tr>
+                           </td>
+                         </tr>
                         {productSales.length > itemsPerPage && (
                           <tr className="bg-amber-50 text-amber-800">
                             <td colSpan={5} className="py-2 sm:py-3 text-xs sm:text-sm text-center">
                               Total all products: {productSales.reduce((sum, product) => sum + product.quantity_sold, 0)} items •
                               Rp {productSales.reduce((sum, product) => sum + product.total_revenue, 0).toLocaleString('id-ID')}
-                            </td>
-                          </tr>
+                             </td>
+                           </tr>
                         )}
                       </tfoot>
                     )}
-                  </table>
+                   </table>
                 </div>
 
                 {/* Pagination Footer Mobile */}
@@ -1326,7 +1320,7 @@ export default function ReportsPage() {
                         <th className="text-left py-2 text-xs sm:text-sm">Quantity</th>
                         <th className="text-left py-2 text-xs sm:text-sm">Revenue</th>
                         <th className="text-left py-2 text-xs sm:text-sm">Percentage</th>
-                       </tr>
+                      </tr>
                     </thead>
                     <tbody>
                       {categorySales.map((category: CategorySales, index: number) => {
@@ -1344,7 +1338,7 @@ export default function ReportsPage() {
                               }`}>
                                 {type}
                               </span>
-                            </td>
+                             </td>
                             <td className="py-2 sm:py-3 text-xs sm:text-sm">
                               <div className="flex items-center">
                                 <span className="font-medium">{formatQuantity(category.quantity_sold, category.category)}</span>
@@ -1354,10 +1348,10 @@ export default function ReportsPage() {
                                   <Coffee className="h-3 w-3 ml-1 text-blue-500" />
                                 ) : null}
                               </div>
-                            </td>
+                             </td>
                             <td className="py-2 sm:py-3 text-xs sm:text-sm">Rp {category.total_revenue.toLocaleString('id-ID')}</td>
                             <td className="py-2 sm:py-3 text-xs sm:text-sm">{category.percentage.toFixed(1)}%</td>
-                          </tr>
+                           </tr>
                         );
                       })}
                     </tbody>
@@ -1367,15 +1361,15 @@ export default function ReportsPage() {
                           <td colSpan={2} className="py-2 sm:py-3 text-xs sm:text-sm">TOTAL</td>
                           <td className="py-2 sm:py-3 text-xs sm:text-sm">
                             {categorySales.reduce((sum, cat) => sum + cat.quantity_sold, 0)} items
-                          </td>
+                           </td>
                           <td className="py-2 sm:py-3 text-xs sm:text-sm">
                             Rp {categorySales.reduce((sum, cat) => sum + cat.total_revenue, 0).toLocaleString('id-ID')}
-                          </td>
+                           </td>
                           <td className="py-2 sm:py-3 text-xs sm:text-sm">100%</td>
-                        </tr>
+                         </tr>
                       </tfoot>
                     )}
-                  </table>
+                   </table>
                 </div>
 
                 {/* Summary Breakdown */}
